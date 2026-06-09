@@ -32,3 +32,6 @@ export function heatColor(t: number): RGB {
 export const HEAT_GRADIENT_CSS = `linear-gradient(to right, ${HEAT_STOPS.map(
   (s) => `rgb(${s.color.join(',')}) ${s.t * 100}%`,
 ).join(', ')})`
+
+// For deck.gl HeatmapLayer's colorRange prop
+export const HEAT_COLOR_RANGE: RGB[] = HEAT_STOPS.map((s) => s.color)
