@@ -26,10 +26,25 @@ function rng(seed) {
 }
 const rand = rng(20260609)
 
-// Smooth value noise via sine hashing (cheap, deterministic)
+// White noise via sine hashing (cheap, deterministic) — uncorrelated per input
 function noise(x, y) {
   const v = Math.sin(x * 1271.3 + y * 311.7) * 43758.5453
   return v - Math.floor(v)
+}
+
+// Smooth value noise: hash sampled on an integer lattice, smoothstep-interpolated.
+// Neighboring inputs correlate, so it produces regional patches, not speckle.
+function valueNoise(x, y) {
+  const xi = Math.floor(x)
+  const yi = Math.floor(y)
+  const u = (x - xi) ** 2 * (3 - 2 * (x - xi))
+  const v = (y - yi) ** 2 * (3 - 2 * (y - yi))
+  const lerp = (a, b, t) => a + (b - a) * t
+  return lerp(
+    lerp(noise(xi, yi), noise(xi + 1, yi), u),
+    lerp(noise(xi, yi + 1), noise(xi + 1, yi + 1), u),
+    v,
+  )
 }
 
 // Coverage density: gaussian blobs over the urban centers
@@ -125,8 +140,11 @@ for (const { cx, cy, d } of cells) {
   if (density < 0.03) continue
   const count = Math.max(1, Math.round(density * 38 * (0.8 + 0.4 * rand())))
 
-  // Denser areas get refreshed more often → younger imagery
-  const age = Math.round(Math.min(12, Math.max(0.5, 2 + (1 - density) * 6 + (rand() - 0.5) * 3)) * 10) / 10
+  // Denser areas get refreshed more often → younger imagery; regional value-noise
+  // patches (camera routes) instead of per-cell speckle
+  const ageRaw =
+    2 + (1 - density) * 5 + (valueNoise(cx * 30, cy * 30) - 0.5) * 5 + (rand() - 0.5) * 0.6
+  const age = Math.round(Math.min(12, Math.max(0.5, ageRaw)) * 10) / 10
 
   const newestYear = 2025 - Math.floor(rand() * 3)
   const newestMonth = 1 + Math.floor(rand() * (newestYear === 2025 ? 11 : 12))
@@ -134,7 +152,10 @@ for (const { cx, cy, d } of cells) {
   const oldestYear = Math.max(2008, newestYear - span)
   const oldestMonth = 1 + Math.floor(rand() * 12)
 
-  const official = Math.round(Math.min(0.99, Math.max(0.3, 0.95 - (1 - density) * 0.3 - rand() * 0.15)) * 100) / 100
+  // Mostly-Google with clustered photosphere pockets (parks, trails, fringe)
+  const pocket = Math.max(0, valueNoise(cx * 24 + 9, cy * 24 + 9) - 0.55) * 2.2
+  const officialRaw = 0.96 - (1 - density) * 0.18 - pocket + (rand() - 0.5) * 0.04
+  const official = Math.round(Math.min(0.99, Math.max(0.2, officialRaw)) * 100) / 100
 
   features.push({
     type: 'Feature',

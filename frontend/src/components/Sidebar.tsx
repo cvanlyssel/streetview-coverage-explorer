@@ -3,6 +3,17 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import type { RegionStats } from '../api/types'
 import { LAYERS, useAppState } from '../state/store'
+import { CountUp } from './CountUp'
+
+const kpiList = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.12 } },
+}
+
+const kpiItem = {
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35 } },
+}
 
 function Logo() {
   return (
@@ -55,25 +66,30 @@ function LayerRows() {
 function KpiCard({
   label,
   value,
+  format,
   sub,
   badge,
 }: {
   label: string
-  value: string
+  value: number
+  format: (n: number) => string
   sub?: string
   badge?: string
 }) {
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
+    <motion.div
+      variants={kpiItem}
+      className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2.5"
+    >
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-zinc-400">{label}</span>
         {badge && <span className="text-[10px] font-semibold text-blue-400">{badge}</span>}
       </div>
       <div className="mt-0.5 text-lg font-bold leading-tight tracking-tight text-white">
-        {value}
+        <CountUp value={value} format={format} />
       </div>
       {sub && <div className="text-[11px] text-zinc-400">{sub}</div>}
-    </div>
+    </motion.div>
   )
 }
 
@@ -108,22 +124,32 @@ export function Sidebar({ stats }: { stats: RegionStats | null }) {
               <LayerRows />
 
               <div className="mt-5 px-1.5 pb-1.5 text-xs font-semibold text-zinc-300">KPI</div>
-              <div className="space-y-2 px-0.5">
-                <KpiCard
-                  label="Samples"
-                  value={stats ? stats.total_samples.toLocaleString() : '—'}
-                  sub="Locations"
-                />
-                <KpiCard
-                  label="Coverage"
-                  value={stats ? `${stats.coverage_pct}%` : '—'}
-                  badge="LIVE"
-                />
-                <KpiCard
-                  label="Avg Age"
-                  value={stats ? `${stats.avg_age_years} yrs` : '—'}
-                />
-              </div>
+              {stats && (
+                <motion.div
+                  variants={kpiList}
+                  initial="hidden"
+                  animate="show"
+                  className="space-y-2 px-0.5"
+                >
+                  <KpiCard
+                    label="Samples"
+                    value={stats.total_samples}
+                    format={(n) => Math.round(n).toLocaleString()}
+                    sub="Locations"
+                  />
+                  <KpiCard
+                    label="Coverage"
+                    value={stats.coverage_pct}
+                    format={(n) => `${n.toFixed(1)}%`}
+                    badge="LIVE"
+                  />
+                  <KpiCard
+                    label="Avg Age"
+                    value={stats.avg_age_years}
+                    format={(n) => `${n.toFixed(1)} yrs`}
+                  />
+                </motion.div>
+              )}
             </div>
           </div>
         </motion.aside>

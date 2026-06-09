@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { fetchHexbins, fetchRegions, fetchStats } from './api/client'
-import type { HexbinCollection, Region, RegionStats } from './api/types'
+import { fetchGaps, fetchHexbins, fetchRegions, fetchStats } from './api/client'
+import type { GapCollection, HexbinCollection, Region, RegionStats } from './api/types'
 import { DetailsPanel } from './components/DetailsPanel'
 import { MapPanel } from './components/MapPanel'
 import { Sidebar } from './components/Sidebar'
@@ -60,6 +60,7 @@ function Shell() {
   const [regions, setRegions] = useState<Region[]>([])
   const [stats, setStats] = useState<RegionStats | null>(null)
   const [hexbins, setHexbins] = useState<HexbinCollection | null>(null)
+  const [gaps, setGaps] = useState<GapCollection | null>(null)
 
   useEffect(() => {
     fetchRegions().then(setRegions).catch(console.error)
@@ -68,6 +69,7 @@ function Shell() {
   useEffect(() => {
     fetchStats(regionId).then(setStats).catch(console.error)
     fetchHexbins(regionId).then(setHexbins).catch(console.error)
+    fetchGaps(regionId).then(setGaps).catch(console.error)
   }, [regionId])
 
   const region = regions.find((r) => r.id === regionId) ?? null
@@ -101,7 +103,7 @@ function Shell() {
             </div>
 
             <div className="flex min-h-0 flex-1 gap-3">
-              <MapPanel region={region} hexbins={hexbins} />
+              <MapPanel region={region} hexbins={hexbins} gaps={gaps} />
               <DetailsPanel stats={stats} />
             </div>
           </main>
