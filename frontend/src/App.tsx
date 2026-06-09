@@ -1,29 +1,121 @@
 import { useEffect, useState } from 'react'
-import { fetchStats } from './api/client'
-import type { RegionStats } from './api/types'
+import { fetchHexbins, fetchRegions, fetchStats } from './api/client'
+import type { HexbinCollection, Region, RegionStats } from './api/types'
+import { DetailsPanel } from './components/DetailsPanel'
+import { MapPanel } from './components/MapPanel'
+import { Sidebar } from './components/Sidebar'
+import { TopBar } from './components/TopBar'
+import { AppStateProvider } from './state/AppState'
+import { useAppState } from './state/store'
 
-function App() {
+function RegionChip({ regions }: { regions: Region[] }) {
+  const { regionId, setRegionId } = useAppState()
+  const current = regions.find((r) => r.id === regionId)
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative">
+        <select
+          value={regionId}
+          onChange={(e) => setRegionId(e.target.value)}
+          className="h-9 appearance-none rounded-lg border border-white/10 bg-white/[0.05] pl-8 pr-8 text-sm font-medium text-zinc-200 outline-none hover:bg-white/[0.08]"
+          aria-label="Region"
+        >
+          {regions.map((r) => (
+            <option key={r.id} value={r.id} className="bg-zinc-900">
+              {r.name}
+            </option>
+          ))}
+        </select>
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 stroke-zinc-400"
+        >
+          <path
+            d="M8 14s4.5-3.6 4.5-7A4.5 4.5 0 0 0 3.5 7c0 3.4 4.5 7 4.5 7Z"
+            strokeWidth="1.4"
+            strokeLinejoin="round"
+          />
+          <circle cx="8" cy="7" r="1.6" strokeWidth="1.4" />
+        </svg>
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 stroke-zinc-400"
+        >
+          <path d="m4 6 4 4 4-4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+      {current && (
+        <span className="hidden text-xs text-zinc-500 xl:block">
+          Updated {current.last_updated}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function Shell() {
+  const { regionId, sidebarOpen, setSidebarOpen } = useAppState()
+  const [regions, setRegions] = useState<Region[]>([])
   const [stats, setStats] = useState<RegionStats | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [hexbins, setHexbins] = useState<HexbinCollection | null>(null)
 
   useEffect(() => {
-    fetchStats('madison').then(setStats).catch((e: Error) => setError(e.message))
+    fetchRegions().then(setRegions).catch(console.error)
   }, [])
 
+  useEffect(() => {
+    fetchStats(regionId).then(setStats).catch(console.error)
+    fetchHexbins(regionId).then(setHexbins).catch(console.error)
+  }, [regionId])
+
+  const region = regions.find((r) => r.id === regionId) ?? null
+
   return (
-    <div className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-100">
-      <div className="text-center">
-        <h1 className="text-2xl font-semibold">Street View Coverage Explorer</h1>
-        <p className="mt-2 text-sm text-zinc-400">Skeleton ready — UI comes in Step 3.</p>
-        {stats && (
-          <p className="mt-4 text-sm text-emerald-400">
-            Mock API live: {stats.total_samples.toLocaleString()} samples,{' '}
-            {stats.coverage_pct}% covered, avg age {stats.avg_age_years}y
-          </p>
-        )}
-        {error && <p className="mt-4 text-sm text-red-400">Mock API error: {error}</p>}
+    <div className="h-full bg-[#c8ccd6] p-6 lg:p-9">
+      <div className="flex h-full overflow-hidden rounded-2xl bg-[#14161c] shadow-2xl shadow-black/40">
+        <Sidebar stats={stats} />
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar />
+
+          <main className="flex min-h-0 flex-1 flex-col px-6 pb-6">
+            <div className="flex h-[72px] shrink-0 items-center justify-between">
+              <div className="flex items-center gap-3">
+                {!sidebarOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setSidebarOpen(true)}
+                    aria-label="Open panel"
+                    className="rounded-lg border border-white/10 p-2 text-zinc-400 hover:bg-white/5 hover:text-white"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 stroke-current">
+                      <path d="M2 4h12M2 8h12M2 12h12" strokeWidth="1.6" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+                <h1 className="text-2xl font-bold tracking-tight text-white">Layers</h1>
+              </div>
+              <RegionChip regions={regions} />
+            </div>
+
+            <div className="flex min-h-0 flex-1 gap-5">
+              <MapPanel region={region} hexbins={hexbins} />
+              <DetailsPanel stats={stats} />
+            </div>
+          </main>
+        </div>
       </div>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <AppStateProvider>
+      <Shell />
+    </AppStateProvider>
   )
 }
 
