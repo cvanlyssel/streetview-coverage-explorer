@@ -1,0 +1,84 @@
+{
+ "region": "madison",
+ "total_samples": 45161,
+ "covered": 41503,
+ "coverage_pct": 91.9,
+ "official_pct": 84.7,
+ "avg_age_years": 4.4,
+ "oldest_date": "2008-06",
+ "newest_date": "2025-11",
+ "age_histogram": [
+  {
+   "year": 2008,
+   "count": 11
+  },
+  {
+   "year": 2009,
+   "count": 49
+  },
+  {
+   "year": 2010,
+   "count": 119
+  },
+  {
+   "year": 2011,
+   "count": 224
+  },
+  {
+   "year": 2012,
+   "count": 365
+  },
+  {
+   "year": 2013,
+   "count": 546
+  },
+  {
+   "year": 2014,
+   "count": 766
+  },
+  {
+   "year": 2015,
+   "count": 1028
+  },
+  {
+   "year": 2016,
+   "count": 1332
+  },
+  {
+   "year": 2017,
+   "count": 1679
+  },
+  {
+   "year": 2018,
+   "count": 2071
+  },
+  {
+   "year": 2019,
+   "count": 4012
+  },
+  {
+   "year": 2020,
+   "count": 2991
+  },
+  {
+   "year": 2021,
+   "count": 3520
+  },
+  {
+   "year": 2022,
+   "count": 6555
+  },
+  {
+   "year": 2023,
+   "count": 4722
+  },
+  {
+   "year": 2024,
+   "count": 5396
+  },
+  {
+   "year": 2025,
+   "count": 6119
+  }
+ ]
+}

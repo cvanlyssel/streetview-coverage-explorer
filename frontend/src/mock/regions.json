@@ -1,0 +1,14 @@
+[
+ {
+  "id": "madison",
+  "name": "Madison, WI",
+  "bbox": [
+   -89.55,
+   43.02,
+   -89.3,
+   43.15
+  ],
+  "point_count": 45161,
+  "last_updated": "2026-06-09"
+ }
+]

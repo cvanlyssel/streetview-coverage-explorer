@@ -1,0 +1,551 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.31435,
+     43.08691
+    ]
+   },
+   "properties": {
+    "nearest_road": "Raymond Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.3153,
+     43.10125
+    ]
+   },
+   "properties": {
+    "nearest_road": "E Washington Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.3998,
+     43.1463
+    ]
+   },
+   "properties": {
+    "nearest_road": "S Park St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.33481,
+     43.10163
+    ]
+   },
+   "properties": {
+    "nearest_road": "Regent St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.41787,
+     43.14176
+    ]
+   },
+   "properties": {
+    "nearest_road": "Atwood Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.5483,
+     43.0761
+    ]
+   },
+   "properties": {
+    "nearest_road": "Northport Dr"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.31543,
+     43.14273
+    ]
+   },
+   "properties": {
+    "nearest_road": "W Johnson St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.345,
+     43.0346
+    ]
+   },
+   "properties": {
+    "nearest_road": "Mineral Point Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.48996,
+     43.09143
+    ]
+   },
+   "properties": {
+    "nearest_road": "McKee Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.47204,
+     43.02178
+    ]
+   },
+   "properties": {
+    "nearest_road": "Regent St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.4405,
+     43.02338
+    ]
+   },
+   "properties": {
+    "nearest_road": "E Washington Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.33986,
+     43.12128
+    ]
+   },
+   "properties": {
+    "nearest_road": "Monroe St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.31499,
+     43.0989
+    ]
+   },
+   "properties": {
+    "nearest_road": "Mineral Point Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.34457,
+     43.11429
+    ]
+   },
+   "properties": {
+    "nearest_road": "W Johnson St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.36061,
+     43.13586
+    ]
+   },
+   "properties": {
+    "nearest_road": "Mineral Point Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.5138,
+     43.04492
+    ]
+   },
+   "properties": {
+    "nearest_road": "University Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.30053,
+     43.04814
+    ]
+   },
+   "properties": {
+    "nearest_road": "Northport Dr"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.4854,
+     43.09099
+    ]
+   },
+   "properties": {
+    "nearest_road": "Mineral Point Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.30639,
+     43.04488
+    ]
+   },
+   "properties": {
+    "nearest_road": "McKee Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.51762,
+     43.14231
+    ]
+   },
+   "properties": {
+    "nearest_road": "McKee Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.38494,
+     43.02401
+    ]
+   },
+   "properties": {
+    "nearest_road": "E Washington Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.3112,
+     43.03915
+    ]
+   },
+   "properties": {
+    "nearest_road": "Monroe St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.50693,
+     43.11455
+    ]
+   },
+   "properties": {
+    "nearest_road": "Williamson St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.53903,
+     43.06899
+    ]
+   },
+   "properties": {
+    "nearest_road": "Williamson St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.30444,
+     43.10005
+    ]
+   },
+   "properties": {
+    "nearest_road": "Regent St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.3163,
+     43.07892
+    ]
+   },
+   "properties": {
+    "nearest_road": "Gammon Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.54176,
+     43.04266
+    ]
+   },
+   "properties": {
+    "nearest_road": "University Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.49321,
+     43.09849
+    ]
+   },
+   "properties": {
+    "nearest_road": "W Johnson St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.30964,
+     43.10729
+    ]
+   },
+   "properties": {
+    "nearest_road": "Monroe St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.47006,
+     43.08591
+    ]
+   },
+   "properties": {
+    "nearest_road": "W Johnson St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.44505,
+     43.03575
+    ]
+   },
+   "properties": {
+    "nearest_road": "E Washington Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.32598,
+     43.06783
+    ]
+   },
+   "properties": {
+    "nearest_road": "Cottage Grove Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.50071,
+     43.06182
+    ]
+   },
+   "properties": {
+    "nearest_road": "Northport Dr"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.50512,
+     43.11939
+    ]
+   },
+   "properties": {
+    "nearest_road": "Fish Hatchery Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.54018,
+     43.14487
+    ]
+   },
+   "properties": {
+    "nearest_road": "S Park St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.40277,
+     43.13565
+    ]
+   },
+   "properties": {
+    "nearest_road": "Cottage Grove Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.471,
+     43.13542
+    ]
+   },
+   "properties": {
+    "nearest_road": "Raymond Rd"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.47573,
+     43.08626
+    ]
+   },
+   "properties": {
+    "nearest_road": "Packers Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.36818,
+     43.11701
+    ]
+   },
+   "properties": {
+    "nearest_road": "S Park St"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.50479,
+     43.13466
+    ]
+   },
+   "properties": {
+    "nearest_road": "N Sherman Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.36525,
+     43.08831
+    ]
+   },
+   "properties": {
+    "nearest_road": "N Sherman Ave"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -89.48003,
+     43.04218
+    ]
+   },
+   "properties": {
+    "nearest_road": "Williamson St"
+   }
+  }
+ ]
+}
