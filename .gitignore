@@ -25,3 +25,7 @@ Thumbs.db
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Data pipeline artifacts (cached API responses + generated GeoJSON)
+data/cache/
+data/output/
