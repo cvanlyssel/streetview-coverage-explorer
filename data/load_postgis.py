@@ -7,8 +7,14 @@ Reads DATABASE_URL from backend/.env (or data/.env). Replaces the region's rows 
 coverage_samples, then derives everything the API serves:
 
   - coverage_samples.nearest_road for ZERO_RESULTS rows (osmnx nearest-edge join)
-  - coverage_hexbins: H3 aggregates at resolutions 7-10 (count, density, age, ratio)
+  - coverage_hexbins: H3 aggregates (count, density, age, ratio)
   - regions: one row per region with bbox, point_count, last_updated
+
+Built to scale to statewide files (millions of features): the GeoJSON is
+streamed (two passes — gaps first for road naming, then inserts + hexbin
+accumulation), samples go in by batch, and statewide regions cap hexbins at
+resolutions 7-8 (res 9-10 over a whole state is millions of cells no client
+should ever request).
 """
 
 from __future__ import annotations
@@ -19,18 +25,21 @@ import sys
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
+from typing import Iterator
 
 import h3
 import psycopg2
 import psycopg2.extras
 from dotenv import dotenv_values
 
-from regions import REGIONS
+from regions import REGIONS, RegionConfig
 
 DATA_DIR = Path(__file__).resolve().parent
 
-HEX_RESOLUTIONS = (7, 8, 9, 10)
+CITY_HEX_RESOLUTIONS = (7, 8, 9, 10)
+STATEWIDE_HEX_RESOLUTIONS = (7, 8)
 GAP_ROAD_MAX_DISTANCE_M = 200
+INSERT_BATCH = 5_000
 
 DDL = """
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -84,6 +93,26 @@ def load_database_url() -> str:
     sys.exit("DATABASE_URL not found in backend/.env or data/.env")
 
 
+def iter_features(path: Path) -> Iterator[dict]:
+    """Stream features without holding the file in memory.
+
+    fetch_coverage.py writes one feature per line (header line, then
+    '<feature>,' lines, then ']}'); older files are a single-line dump and
+    fall back to a whole-file parse.
+    """
+    with path.open(encoding="utf-8") as f:
+        first = f.readline()
+        if first.strip() == '{"type": "FeatureCollection", "features": [':
+            for line in f:
+                line = line.strip().rstrip(",")
+                if not line or line in ("]}", "]"):
+                    continue
+                yield json.loads(line)
+            return
+    # Legacy single-line format (Madison/Milwaukee era files)
+    yield from json.loads(path.read_text(encoding="utf-8"))["features"]
+
+
 def age_years(date_str: str, today: date) -> float | None:
     """Years between a YYYY-MM pano date and today."""
     try:
@@ -100,59 +129,54 @@ def hex_wkt(hex_id: str) -> str:
     return f"POLYGON(({', '.join(ring)}))"
 
 
-def build_hexbin_rows(region_id: str, features: list[dict], today: date) -> list[tuple]:
-    """Aggregate OK samples into H3 cells at each resolution, contract-shaped."""
-    rows: list[tuple] = []
-    for resolution in HEX_RESOLUTIONS:
-        cells: dict[str, list[dict]] = defaultdict(list)
-        for f in features:
-            p = f["properties"]
-            if p["status"] != "OK":
-                continue
-            cells[h3.latlng_to_cell(p["lat"], p["lng"], resolution)].append(p)
+class HexAccumulator:
+    """Streaming per-cell aggregates: no feature list ever materializes."""
 
-        if not cells:
-            continue
-        max_count = max(len(samples) for samples in cells.values())
-        for hex_id, samples in cells.items():
-            ages = [a for p in samples if (a := age_years(p["date"], today)) is not None]
-            dates = [p["date"] for p in samples if p["date"]]
-            rows.append(
-                (
+    def __init__(self, resolutions: tuple[int, ...]) -> None:
+        self.resolutions = resolutions
+        # hex_id -> [count, age_sum, age_n, google_n, min_date, max_date]
+        self.cells: dict[int, dict[str, list]] = {r: defaultdict(lambda: [0, 0.0, 0, 0, "", ""]) for r in resolutions}
+
+    def add(self, props: dict, today: date) -> None:
+        if props["status"] != "OK":
+            return
+        age = age_years(props["date"], today)
+        d = props["date"]
+        for res in self.resolutions:
+            cell = self.cells[res][h3.latlng_to_cell(props["lat"], props["lng"], res)]
+            cell[0] += 1
+            if age is not None:
+                cell[1] += age
+                cell[2] += 1
+            if props["source"] == "google":
+                cell[3] += 1
+            if d:
+                cell[4] = min(cell[4] or d, d)
+                cell[5] = max(cell[5], d)
+
+    def rows(self, region_id: str) -> Iterator[tuple]:
+        for res in self.resolutions:
+            cells = self.cells[res]
+            if not cells:
+                continue
+            max_count = max(c[0] for c in cells.values())
+            for hex_id, (count, age_sum, age_n, google_n, dmin, dmax) in cells.items():
+                yield (
                     region_id,
-                    resolution,
+                    res,
                     hex_id,
-                    len(samples),
-                    len(samples) / max_count,
-                    round(sum(ages) / len(ages), 2) if ages else 0.0,
-                    min(dates) if dates else "",
-                    max(dates) if dates else "",
-                    sum(1 for p in samples if p["source"] == "google") / len(samples),
+                    count,
+                    count / max_count,
+                    round(age_sum / age_n, 2) if age_n else 0.0,
+                    dmin,
+                    dmax,
+                    google_n / count,
                     hex_wkt(hex_id),
                 )
-            )
-    return rows
 
 
-def nearest_road_names(
-    region_id: str, gaps: list[tuple[int, float, float]]
-) -> dict[int, str]:
-    """Map gap sample index -> nearest drivable road name within 200 m."""
+def _names_from_edges(edges, gap_gdf) -> dict[int, str]:
     import geopandas as gpd
-    import osmnx as ox
-    from shapely.geometry import Point
-
-    ox.settings.use_cache = True
-    ox.settings.cache_folder = DATA_DIR / "cache" / "osmnx"
-
-    graph = ox.graph_from_bbox(REGIONS[region_id].bbox, network_type="drive")
-    edges = ox.graph_to_gdfs(graph, nodes=False)[["name", "geometry"]].to_crs(epsg=32616)
-
-    gap_gdf = gpd.GeoDataFrame(
-        {"idx": [i for i, _, _ in gaps]},
-        geometry=[Point(lng, lat) for _, lng, lat in gaps],
-        crs=4326,
-    ).to_crs(epsg=32616)
 
     joined = gpd.sjoin_nearest(
         gap_gdf, edges, how="left", max_distance=GAP_ROAD_MAX_DISTANCE_M
@@ -165,7 +189,64 @@ def nearest_road_names(
         name = row["name"]
         if isinstance(name, list):
             name = name[0] if name else None
-        names[int(row["idx"])] = name if isinstance(name, str) and name else "Unnamed road"
+        if isinstance(name, str) and name:
+            names[int(row["idx"])] = name
+    return names
+
+
+def nearest_road_names(
+    region: RegionConfig, gaps: list[tuple[int, float, float]]
+) -> dict[int, str]:
+    """Map gap sample index -> nearest drivable road name within 200 m.
+
+    City regions: one bbox graph. Statewide regions: county by county against
+    the osmnx disk cache, resolving only gaps inside each county's envelope.
+    """
+    import geopandas as gpd
+    import osmnx as ox
+    from shapely.geometry import Point
+
+    ox.settings.use_cache = True
+    ox.settings.cache_folder = DATA_DIR / "cache" / "osmnx"
+
+    def gap_frame(subset: list[tuple[int, float, float]]):
+        return gpd.GeoDataFrame(
+            {"idx": [i for i, _, _ in subset]},
+            geometry=[Point(lng, lat) for _, lng, lat in subset],
+            crs=4326,
+        ).to_crs(epsg=region.metric_epsg)
+
+    if not region.counties:
+        graph = ox.graph_from_bbox(region.bbox, network_type="drive")
+        edges = ox.graph_to_gdfs(graph, nodes=False)[["name", "geometry"]].to_crs(
+            epsg=region.metric_epsg
+        )
+        return _names_from_edges(edges, gap_frame(gaps))
+
+    names: dict[int, str] = {}
+    unresolved = gaps
+    for n, county in enumerate(region.counties):
+        if not unresolved:
+            break
+        graph = ox.graph_from_place(county, network_type="drive")
+        edges = ox.graph_to_gdfs(graph, nodes=False)[["name", "geometry"]]
+        del graph
+        west, south, east, north = edges.total_bounds
+        local = [
+            g
+            for g in unresolved
+            if west - 0.01 <= g[1] <= east + 0.01 and south - 0.01 <= g[2] <= north + 0.01
+        ]
+        if local:
+            names.update(
+                _names_from_edges(edges.to_crs(epsg=region.metric_epsg), gap_frame(local))
+            )
+            unresolved = [g for g in unresolved if g[0] not in names]
+        print(
+            f"  [{n + 1}/{len(region.counties)}] {county.split(',')[0]}: "
+            f"{len(names):,} named, {len(unresolved):,} left",
+            flush=True,
+        )
     return names
 
 
@@ -173,75 +254,113 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Load coverage GeoJSON into PostGIS.")
     parser.add_argument("--region", required=True, choices=sorted(REGIONS), help="Region id")
     parser.add_argument("--file", required=True, help="GeoJSON path from fetch_coverage.py")
+    parser.add_argument(
+        "--skip-road-names",
+        action="store_true",
+        help="Skip the osmnx nearest-road join for gaps (API falls back to 'Unnamed road')",
+    )
     args = parser.parse_args()
     region = REGIONS[args.region]
     today = date.today()
+    resolutions = STATEWIDE_HEX_RESOLUTIONS if region.counties else CITY_HEX_RESOLUTIONS
 
     geojson_path = Path(args.file)
     if not geojson_path.is_absolute():
         geojson_path = DATA_DIR / geojson_path
-    features = json.loads(geojson_path.read_text(encoding="utf-8"))["features"]
-    print(f"Loaded {len(features):,} features from {geojson_path.name}")
 
+    # Pass 1: gap coordinates only (cheap), so names exist before the insert.
     gaps = [
         (i, f["geometry"]["coordinates"][0], f["geometry"]["coordinates"][1])
-        for i, f in enumerate(features)
+        for i, f in enumerate(iter_features(geojson_path))
         if f["properties"]["status"] == "ZERO_RESULTS"
     ]
     gap_names: dict[int, str] = {}
-    if gaps:
+    if gaps and not args.skip_road_names:
         print(f"Resolving road names for {len(gaps):,} gap points ...")
-        gap_names = nearest_road_names(args.region, gaps)
-
-    sample_rows = [
-        (
-            args.region,
-            f["properties"]["pano_id"] or None,
-            f["properties"]["date"] or None,
-            f["properties"]["source"],
-            f["properties"]["status"],
-            gap_names.get(i),
-            f["geometry"]["coordinates"][0],
-            f["geometry"]["coordinates"][1],
-        )
-        for i, f in enumerate(features)
-    ]
-
-    print(f"Aggregating hexbins at resolutions {HEX_RESOLUTIONS} ...")
-    hexbin_rows = build_hexbin_rows(args.region, features, today)
-    print(f"  {len(hexbin_rows):,} hex cells")
+        gap_names = nearest_road_names(region, gaps)
 
     conn = psycopg2.connect(load_database_url())
+    accum = HexAccumulator(resolutions)
+    total = 0
     try:
         with conn, conn.cursor() as cur:
             cur.execute(DDL)
-
             cur.execute("DELETE FROM coverage_samples WHERE region = %s", (args.region,))
-            psycopg2.extras.execute_values(
-                cur,
-                """
-                INSERT INTO coverage_samples
-                    (region, pano_id, date, source, status, nearest_road, geom)
-                VALUES %s
-                """,
-                sample_rows,
-                template="(%s, %s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
-                page_size=1000,
-            )
+
+            # Pass 2: stream inserts + hexbin accumulation in one walk.
+            batch: list[tuple] = []
+
+            def flush() -> None:
+                psycopg2.extras.execute_values(
+                    cur,
+                    """
+                    INSERT INTO coverage_samples
+                        (region, pano_id, date, source, status, nearest_road, geom)
+                    VALUES %s
+                    """,
+                    batch,
+                    template="(%s, %s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
+                    page_size=1000,
+                )
+                batch.clear()
+
+            for i, f in enumerate(iter_features(geojson_path)):
+                p = f["properties"]
+                accum.add(p, today)
+                batch.append(
+                    (
+                        args.region,
+                        p["pano_id"] or None,
+                        p["date"] or None,
+                        p["source"],
+                        p["status"],
+                        gap_names.get(i),
+                        f["geometry"]["coordinates"][0],
+                        f["geometry"]["coordinates"][1],
+                    )
+                )
+                total += 1
+                if len(batch) >= INSERT_BATCH:
+                    flush()
+                    if total % 500_000 == 0:
+                        print(f"  {total:,} samples inserted ...", flush=True)
+            if batch:
+                flush()
+            print(f"Inserted {total:,} samples; writing hexbins at {resolutions} ...")
 
             cur.execute("DELETE FROM coverage_hexbins WHERE region = %s", (args.region,))
-            psycopg2.extras.execute_values(
-                cur,
-                """
-                INSERT INTO coverage_hexbins
-                    (region, resolution, hex_id, coverage_count, coverage_density,
-                     avg_age_years, oldest_date, newest_date, official_ratio, geom)
-                VALUES %s
-                """,
-                hexbin_rows,
-                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))",
-                page_size=500,
-            )
+            hex_batch: list[tuple] = []
+            hex_total = 0
+            for row in accum.rows(args.region):
+                hex_batch.append(row)
+                hex_total += 1
+                if len(hex_batch) >= 2_000:
+                    psycopg2.extras.execute_values(
+                        cur,
+                        """
+                        INSERT INTO coverage_hexbins
+                            (region, resolution, hex_id, coverage_count, coverage_density,
+                             avg_age_years, oldest_date, newest_date, official_ratio, geom)
+                        VALUES %s
+                        """,
+                        hex_batch,
+                        template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))",
+                        page_size=500,
+                    )
+                    hex_batch.clear()
+            if hex_batch:
+                psycopg2.extras.execute_values(
+                    cur,
+                    """
+                    INSERT INTO coverage_hexbins
+                        (region, resolution, hex_id, coverage_count, coverage_density,
+                         avg_age_years, oldest_date, newest_date, official_ratio, geom)
+                    VALUES %s
+                    """,
+                    hex_batch,
+                    template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))",
+                    page_size=500,
+                )
 
             cur.execute(
                 """
@@ -255,7 +374,7 @@ def main() -> None:
                     point_count = EXCLUDED.point_count,
                     last_updated = EXCLUDED.last_updated
                 """,
-                (args.region, region.name, *region.bbox, len(features), today),
+                (args.region, region.name, *region.bbox, total, today),
             )
 
             cur.execute(

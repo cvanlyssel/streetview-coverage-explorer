@@ -138,10 +138,16 @@ def sample_points_by_county(
     skip straight to the merge. Dedupe runs on the same ~10 m grid as the
     bbox path but globally, so roads on county lines aren't double-counted.
     """
+    import os
+
     import osmnx as ox
 
     ox.settings.use_cache = True
     ox.settings.cache_folder = CACHE_DIR / "osmnx"
+    # Escape hatch when overpass-api.de throttles a long county run:
+    # OVERPASS_URL=https://overpass.kumi.systems/api/interpreter
+    if os.environ.get("OVERPASS_URL"):
+        ox.settings.overpass_url = os.environ["OVERPASS_URL"]
 
     points_dir = POINTS_DIR / region.region_id
     points_dir.mkdir(parents=True, exist_ok=True)
@@ -155,7 +161,21 @@ def sample_points_by_county(
             pts = json.loads(county_path.read_text(encoding="utf-8"))
         else:
             t0 = time.monotonic()
-            graph = ox.graph_from_place(county, network_type="drive")
+            graph = None
+            for attempt in range(4):
+                try:
+                    graph = ox.graph_from_place(county, network_type="drive")
+                    break
+                except Exception as exc:  # Overpass timeouts/busy are routine
+                    if attempt == 3:
+                        raise
+                    wait = 60 * (attempt + 1)
+                    print(
+                        f"  [{i + 1}/{len(region.counties)}] {county.split(',')[0]}: "
+                        f"{type(exc).__name__}, retrying in {wait}s",
+                        flush=True,
+                    )
+                    time.sleep(wait)
             raw = _interpolated_points(graph, spacing_m, region.metric_epsg)
             del graph
             pts = [(p.x, p.y) for p in raw]
