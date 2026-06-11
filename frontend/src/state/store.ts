@@ -2,13 +2,14 @@
 
 import { createContext, useContext } from 'react'
 
-export type LayerId = 'density' | 'age' | 'official' | 'gaps'
+export type LayerId = 'density' | 'age' | 'official' | 'gaps' | 'timelapse'
 
 export const LAYERS: { id: LayerId; label: string }[] = [
   { id: 'density', label: 'Density' },
   { id: 'age', label: 'Coverage Age' },
   { id: 'official', label: 'Official vs Unofficial' },
   { id: 'gaps', label: 'Coverage Gaps' },
+  { id: 'timelapse', label: 'Time-lapse' },
 ]
 
 export interface AppState {

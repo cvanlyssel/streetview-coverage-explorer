@@ -58,6 +58,12 @@ const AGE_STOPS: Stop[] = [
 export const ageColor = (ageYears: number): RGB => interpolate(AGE_STOPS, ageYears / 10)
 export const AGE_GRADIENT_CSS = gradientCSS(AGE_STOPS)
 
+// Same ramp on a capture-year axis (left = oldest = stale yellow), for the
+// time-lapse legend and histogram.
+export const CAPTURE_YEAR_GRADIENT_CSS = gradientCSS(
+  AGE_STOPS.map((s) => ({ t: 1 - s.t, color: s.color })).reverse(),
+)
+
 // --- Official vs unofficial (diverging, t = official_ratio) -------------------
 
 const OFFICIAL_STOPS: Stop[] = [

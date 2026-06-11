@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
-import { fetchGaps, fetchHexbins, fetchRegions, fetchStats } from './api/client'
-import type { GapCollection, HexbinCollection, Region, RegionStats } from './api/types'
+import { fetchGaps, fetchHexbins, fetchPoints, fetchRegions, fetchStats } from './api/client'
+import type {
+  GapCollection,
+  HexbinCollection,
+  PointCollection,
+  Region,
+  RegionStats,
+} from './api/types'
 import { DetailsPanel } from './components/DetailsPanel'
 import { MapPanel } from './components/MapPanel'
 import { Sidebar } from './components/Sidebar'
@@ -56,11 +62,17 @@ function RegionChip({ regions }: { regions: Region[] }) {
 }
 
 function Shell() {
-  const { regionId, sidebarOpen, setSidebarOpen } = useAppState()
+  const { regionId, activeLayer, sidebarOpen, setSidebarOpen } = useAppState()
   const [regions, setRegions] = useState<Region[]>([])
   const [stats, setStats] = useState<RegionStats | null>(null)
   const [hexbins, setHexbins] = useState<HexbinCollection | null>(null)
   const [gaps, setGaps] = useState<GapCollection | null>(null)
+  // Keyed by region so a region switch invalidates without a reset effect.
+  const [pointsCache, setPointsCache] = useState<{
+    regionId: string
+    data: PointCollection
+  } | null>(null)
+  const points = pointsCache?.regionId === regionId ? pointsCache.data : null
 
   useEffect(() => {
     fetchRegions().then(setRegions).catch(console.error)
@@ -71,6 +83,21 @@ function Shell() {
     fetchHexbins(regionId).then(setHexbins).catch(console.error)
     fetchGaps(regionId).then(setGaps).catch(console.error)
   }, [regionId])
+
+  // Per-point data is heavy (10s of MB for a full region), so it loads only
+  // once the time-lapse layer is opened, then sticks for the region.
+  useEffect(() => {
+    if (activeLayer !== 'timelapse' || points) return
+    let stale = false
+    fetchPoints(regionId)
+      .then((data) => {
+        if (!stale) setPointsCache({ regionId, data })
+      })
+      .catch(console.error)
+    return () => {
+      stale = true
+    }
+  }, [activeLayer, regionId, points])
 
   const region = regions.find((r) => r.id === regionId) ?? null
 
@@ -103,7 +130,7 @@ function Shell() {
             </div>
 
             <div className="flex min-h-0 flex-1 gap-3">
-              <MapPanel region={region} hexbins={hexbins} gaps={gaps} />
+              <MapPanel region={region} hexbins={hexbins} gaps={gaps} points={points} stats={stats} />
               <DetailsPanel stats={stats} />
             </div>
           </main>

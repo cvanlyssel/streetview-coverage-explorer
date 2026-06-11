@@ -2,12 +2,13 @@
 // Layer switches cross-fade by rendering the outgoing and incoming layers
 // together while a framer-motion tween drives their opacities.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { PolygonLayer, ScatterplotLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
+import { DataFilterExtension, type DataFilterExtensionProps } from '@deck.gl/extensions'
 import { animate, AnimatePresence, motion } from 'framer-motion'
 import type {
   Feature,
@@ -15,26 +16,50 @@ import type {
   GapProperties,
   HexbinCollection,
   HexbinProperties,
+  PointCollection,
   PointGeometry,
   PolygonGeometry,
   Region,
+  RegionStats,
 } from '../api/types'
 import {
   AGE_GRADIENT_CSS,
+  CAPTURE_YEAR_GRADIENT_CSS,
   GAP_COLOR,
   HEAT_COLOR_RANGE,
   HEAT_GRADIENT_CSS,
   OFFICIAL_GRADIENT_CSS,
+  type RGB,
   ageColor,
   officialColor,
 } from '../lib/colors'
 import { useAppState, type LayerId } from '../state/store'
+import { TimelapseControl } from './TimelapseControl'
 
 const DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 
 type HexFeature = Feature<PolygonGeometry, HexbinProperties>
 type GapPointFeature = Feature<PointGeometry, GapProperties>
-type PickedFeature = HexFeature | GapPointFeature
+
+// Flat per-pano rows for the time-lapse: fractional capture year for the GPU
+// filter, precomputed color so accessors stay trivial at 100k+ points.
+interface TimelapsePoint {
+  position: [number, number]
+  year: number
+  date: string
+  source: string
+  color: RGB
+}
+
+interface TimelapseState {
+  data: TimelapsePoint[] | null
+  year: number
+  minYear: number
+}
+
+type PickedFeature = HexFeature | GapPointFeature | TimelapsePoint
+
+const NOW_YEAR = new Date().getFullYear()
 
 function centroid(f: HexFeature): [number, number] {
   const ring = f.geometry.coordinates[0]
@@ -51,6 +76,7 @@ function layersFor(
   layerId: LayerId,
   hexbins: HexbinCollection | null,
   gaps: GapCollection | null,
+  timelapse: TimelapseState,
   opacity: number,
   pickable: boolean,
 ) {
@@ -127,11 +153,39 @@ function layersFor(
           opacity,
         }),
       ]
+    case 'timelapse':
+      if (!timelapse.data) return []
+      return [
+        new ScatterplotLayer<TimelapsePoint, DataFilterExtensionProps<TimelapsePoint>>({
+          id: 'timelapse-points',
+          data: timelapse.data,
+          getPosition: (d) => d.position,
+          getFillColor: (d) => [...d.color, 210],
+          radiusMinPixels: 1.8,
+          radiusMaxPixels: 5,
+          pickable,
+          opacity,
+          // Cumulative reveal on the GPU: scrubbing/playing only changes
+          // filterRange, so no per-frame re-upload of 50k+ points.
+          extensions: [new DataFilterExtension({ filterSize: 1 })],
+          getFilterValue: (d) => d.year,
+          filterRange: [timelapse.minYear - 1, timelapse.year + 0.001],
+        }),
+      ]
   }
 }
 
 function tooltipFor(object: PickedFeature | null) {
   if (!object) return null
+  if ('year' in object) {
+    return {
+      html: `
+        <div style="font-weight:600;margin-bottom:2px">Captured ${object.date}</div>
+        <div style="color:#9ca3af">${object.source === 'google' ? 'Google car/trekker' : 'User photosphere'}</div>
+      `,
+      style: TOOLTIP_STYLE,
+    }
+  }
   const p = object.properties
   const html =
     'nearest_road' in p
@@ -145,17 +199,16 @@ function tooltipFor(object: PickedFeature | null) {
         <div>Official: ${Math.round(p.official_ratio * 100)}%</div>
         <div style="color:#9ca3af">${p.oldest_date} – ${p.newest_date}</div>
       `
-  return {
-    html,
-    style: {
-      background: 'rgba(20,22,28,0.95)',
-      color: '#e5e7eb',
-      fontSize: '12px',
-      borderRadius: '8px',
-      padding: '8px 10px',
-      border: '1px solid rgba(255,255,255,0.1)',
-    },
-  }
+  return { html, style: TOOLTIP_STYLE }
+}
+
+const TOOLTIP_STYLE = {
+  background: 'rgba(20,22,28,0.95)',
+  color: '#e5e7eb',
+  fontSize: '12px',
+  borderRadius: '8px',
+  padding: '8px 10px',
+  border: '1px solid rgba(255,255,255,0.1)',
 }
 
 const LEGENDS: Record<
@@ -171,6 +224,12 @@ const LEGENDS: Record<
     right: 'Google',
   },
   gaps: { title: 'Coverage gaps', dot: 'Road with no Street View' },
+  timelapse: {
+    title: 'Capture year',
+    gradient: CAPTURE_YEAR_GRADIENT_CSS,
+    left: 'Older',
+    right: 'Newer',
+  },
 }
 
 function Legend({ layerId }: { layerId: LayerId }) {
@@ -214,10 +273,14 @@ export function MapPanel({
   region,
   hexbins,
   gaps,
+  points,
+  stats,
 }: {
   region: Region | null
   hexbins: HexbinCollection | null
   gaps: GapCollection | null
+  points: PointCollection | null
+  stats: RegionStats | null
 }) {
   const { activeLayer } = useAppState()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -227,6 +290,50 @@ export function MapPanel({
   // Cross-fade: prev holds the outgoing layer until the tween finishes
   const [fade, setFade] = useState<{ prev: LayerId | null; t: number }>({ prev: null, t: 1 })
   const shownLayerRef = useRef(activeLayer)
+
+  const yearRange = useMemo<[number, number] | null>(() => {
+    if (!stats || stats.oldest_date.length < 4 || stats.newest_date.length < 4) return null
+    return [Number(stats.oldest_date.slice(0, 4)), Number(stats.newest_date.slice(0, 4))]
+  }, [stats])
+
+  // Time-lapse year is ephemeral animation state (like `fade`), so it stays
+  // local instead of in the app store: play advances it every rAF frame.
+  // Keying the override by region makes a region switch fall back to the
+  // default (fully revealed) without a reset effect.
+  const [yearOverride, setYearOverride] = useState<{ key: string; year: number } | null>(null)
+  const domainKey = stats?.region ?? ''
+  const timelapseYear = yearOverride?.key === domainKey ? yearOverride.year : (yearRange?.[1] ?? null)
+  const setTimelapseYear = useCallback(
+    (year: number) => setYearOverride({ key: domainKey, year }),
+    [domainKey],
+  )
+
+  const timelapseData = useMemo<TimelapsePoint[] | null>(() => {
+    if (!points) return null
+    const rows: TimelapsePoint[] = []
+    for (const f of points.features) {
+      const p = f.properties
+      if (p.status !== 'OK' || p.date.length < 7) continue
+      const year = Number(p.date.slice(0, 4)) + (Number(p.date.slice(5, 7)) - 1) / 12
+      rows.push({
+        position: f.geometry.coordinates,
+        year,
+        date: p.date,
+        source: p.source,
+        color: ageColor(NOW_YEAR - year),
+      })
+    }
+    return rows
+  }, [points])
+
+  const timelapse = useMemo<TimelapseState>(
+    () => ({
+      data: timelapseData,
+      year: timelapseYear ?? yearRange?.[1] ?? NOW_YEAR,
+      minYear: yearRange?.[0] ?? 2007,
+    }),
+    [timelapseData, timelapseYear, yearRange],
+  )
 
   useEffect(() => {
     if (shownLayerRef.current === activeLayer) return
@@ -243,10 +350,10 @@ export function MapPanel({
 
   const layers = useMemo(() => {
     const out = []
-    if (fade.prev) out.push(...layersFor(fade.prev, hexbins, gaps, 1 - fade.t, false))
-    out.push(...layersFor(activeLayer, hexbins, gaps, fade.t, true))
+    if (fade.prev) out.push(...layersFor(fade.prev, hexbins, gaps, timelapse, 1 - fade.t, false))
+    out.push(...layersFor(activeLayer, hexbins, gaps, timelapse, fade.t, true))
     return out
-  }, [hexbins, gaps, activeLayer, fade])
+  }, [hexbins, gaps, timelapse, activeLayer, fade])
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -290,6 +397,19 @@ export function MapPanel({
       {/* h-full (not absolute inset-0): maplibre css forces position:relative on this node */}
       <div ref={containerRef} className="h-full w-full" />
       <Legend layerId={activeLayer} />
+      <AnimatePresence>
+        {activeLayer === 'timelapse' && yearRange && stats && (
+          <TimelapseControl
+            key="timelapse-control"
+            minYear={yearRange[0]}
+            maxYear={yearRange[1]}
+            year={timelapse.year}
+            onYearChange={setTimelapseYear}
+            histogram={stats.age_histogram}
+            loading={!timelapseData}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
