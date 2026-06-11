@@ -289,13 +289,16 @@ def main() -> None:
         gap_names = nearest_road_names(region, gaps)
 
     # keepalives: remote (Render) loads stream for minutes; idle gaps during
-    # local hexbin WKT generation otherwise let middleboxes drop the TLS link
+    # local hexbin WKT generation otherwise let middleboxes drop the TLS link.
+    # TLS capped at 1.2: sustained bulk writes from Windows OpenSSL over
+    # TLS 1.3 die with "ssl/tls alert bad record mac" (seen twice mid-insert).
     conn = psycopg2.connect(
         load_database_url(),
         keepalives=1,
         keepalives_idle=30,
         keepalives_interval=10,
         keepalives_count=5,
+        ssl_max_protocol_version="TLSv1.2",
     )
     accum = HexAccumulator(resolutions)
     total = 0
@@ -317,7 +320,7 @@ def main() -> None:
                     """,
                     batch,
                     template="(%s, %s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
-                    page_size=1000,
+                    page_size=200,  # smaller TLS records: see connect() note
                 )
                 batch.clear()
 
