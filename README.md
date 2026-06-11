@@ -1,7 +1,7 @@
 # Street View Coverage Explorer
 
-**An interactive dashboard for the Google Street View *coverage meta* — built on 52,450 real
-measurements of every drivable road in Madison, WI.**
+**An interactive dashboard for the Google Street View *coverage meta* — built on 192,559 real
+measurements of every drivable road in Madison and Milwaukee, WI.**
 
 ![Coverage density over Madison's real road network](docs/screenshots/density.png)
 
@@ -28,6 +28,11 @@ Street View metadata endpoint:
 The 2025 city-wide recapture dominates (41,798 of 51,189 covered points), but pockets of
 2007–2011 imagery survive — and the coverage gaps map almost perfectly onto subdivisions
 built after Google's last drive.
+
+A second region — **Milwaukee: 140,109 points, 99.8% covered, avg age 2.2 years** — runs
+through the identical pipeline; switch regions in the app and the map flies between them.
+
+![Milwaukee coverage density](docs/screenshots/milwaukee-density.png)
 
 ## The four layers
 
