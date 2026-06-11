@@ -127,7 +127,9 @@ def points(
             west, south, east, north = (float(v) for v in bbox.split(","))
         except ValueError:
             raise HTTPException(status_code=422, detail="bbox must be west,south,east,north")
-        bbox_sql = "AND geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)"
+        # ST_Intersects, not &&: box-only comparison happens in float4 and can
+        # leak points ~1e-6 deg past the envelope edge
+        bbox_sql = "AND ST_Intersects(geom, ST_MakeEnvelope(%s, %s, %s, %s, 4326))"
         params += [west, south, east, north]
 
     with conn.cursor() as cur:
