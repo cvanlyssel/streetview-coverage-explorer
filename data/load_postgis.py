@@ -288,7 +288,15 @@ def main() -> None:
         print(f"Resolving road names for {len(gaps):,} gap points ...")
         gap_names = nearest_road_names(region, gaps)
 
-    conn = psycopg2.connect(load_database_url())
+    # keepalives: remote (Render) loads stream for minutes; idle gaps during
+    # local hexbin WKT generation otherwise let middleboxes drop the TLS link
+    conn = psycopg2.connect(
+        load_database_url(),
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
     accum = HexAccumulator(resolutions)
     total = 0
     try:
