@@ -128,6 +128,110 @@ def _grid_key(lng: float, lat: float) -> int:
     return int(round(lng * 10_000)) * 4_000_000 + int(round(lat * 10_000))
 
 
+# osmnx's 'drive' network in allowlist form: no service roads, tracks, paths.
+DRIVE_HIGHWAYS = {
+    "motorway", "motorway_link", "trunk", "trunk_link",
+    "primary", "primary_link", "secondary", "secondary_link",
+    "tertiary", "tertiary_link", "unclassified", "residential",
+    "living_street", "road",
+}
+
+
+def sample_points_from_pbf(
+    region: RegionConfig, spacing_m: float, pbf_path: Path
+) -> list[tuple[float, float]]:
+    """Sample the whole region from a Geofabrik PBF extract — no Overpass.
+
+    Streams ways with pyosmium (node locations in RAM, ways never collected),
+    interpolates every `spacing_m` along each drivable way in the region's
+    metric CRS, and dedupes on the same ~10 m grid as the other paths.
+    Statewide downloads kept tripping Overpass's per-IP limits; one static
+    extract sidesteps the API entirely.
+    """
+    import osmium
+    from pyproj import Transformer
+
+    points_cache = POINTS_DIR / f"{region.region_id}.pbf-points.json"
+    if points_cache.exists():
+        print(f"  loading cached PBF sample points: {points_cache.name}", flush=True)
+        return [tuple(p) for p in json.loads(points_cache.read_text(encoding="utf-8"))]
+
+    to_metric = Transformer.from_crs(4326, region.metric_epsg, always_xy=True)
+    to_wgs = Transformer.from_crs(region.metric_epsg, 4326, always_xy=True)
+
+    seen: set[int] = set()
+    result: list[tuple[float, float]] = []
+    stats = {"ways": 0}
+    t0 = time.monotonic()
+
+    class RoadHandler(osmium.SimpleHandler):
+        def way(self, w) -> None:
+            tags = w.tags
+            if tags.get("highway") not in DRIVE_HIGHWAYS:
+                return
+            if tags.get("area") == "yes":
+                return
+            if tags.get("access") in ("private", "no"):
+                return
+            if tags.get("motor_vehicle") == "no" or tags.get("motorcar") == "no":
+                return
+            lons, lats = [], []
+            for n in w.nodes:
+                if n.location.valid():
+                    lons.append(n.lon)
+                    lats.append(n.lat)
+            if len(lons) < 2:
+                return
+            xs, ys = to_metric.transform(lons, lats)
+
+            # Mirror the osmnx path: a point at 0, every spacing_m, and the end.
+            sample_x: list[float] = []
+            sample_y: list[float] = []
+            walked = 0.0
+            next_at = 0.0
+            for i in range(1, len(xs)):
+                seg_dx = xs[i] - xs[i - 1]
+                seg_dy = ys[i] - ys[i - 1]
+                seg_len = (seg_dx * seg_dx + seg_dy * seg_dy) ** 0.5
+                while next_at <= walked + seg_len:
+                    f = (next_at - walked) / seg_len if seg_len else 0.0
+                    sample_x.append(xs[i - 1] + seg_dx * f)
+                    sample_y.append(ys[i - 1] + seg_dy * f)
+                    next_at += spacing_m
+                walked += seg_len
+            sample_x.append(xs[-1])  # way endpoint, like interpolate(length)
+            sample_y.append(ys[-1])
+
+            for lng, lat in zip(*to_wgs.transform(sample_x, sample_y)):
+                cell = _grid_key(lng, lat)
+                if cell in seen:
+                    continue
+                seen.add(cell)
+                result.append((lng, lat))
+
+            stats["ways"] += 1
+            if stats["ways"] % 100_000 == 0:
+                print(
+                    f"  {stats['ways']:,} drivable ways -> {len(result):,} points "
+                    f"({time.monotonic() - t0:.0f}s)",
+                    flush=True,
+                )
+
+    RoadHandler().apply_file(str(pbf_path), locations=True, idx="flex_mem")
+    print(
+        f"  PBF pass done: {stats['ways']:,} drivable ways in "
+        f"{time.monotonic() - t0:.0f}s",
+        flush=True,
+    )
+
+    points_cache.parent.mkdir(parents=True, exist_ok=True)
+    points_cache.write_text(
+        json.dumps([[round(lng, 6), round(lat, 6)] for lng, lat in result]),
+        encoding="utf-8",
+    )
+    return result
+
+
 def sample_points_by_county(
     region: RegionConfig, spacing_m: float
 ) -> list[tuple[float, float]]:
@@ -144,10 +248,18 @@ def sample_points_by_county(
 
     ox.settings.use_cache = True
     ox.settings.cache_folder = CACHE_DIR / "osmnx"
+    # One query per county instead of osmnx's default ~50 km^2 subdivision:
+    # a county-sized burst of rapid sub-query connections trips Overpass's
+    # per-IP connect limiter (observed as ConnectTimeout mid-county).
+    ox.settings.max_query_area_size = 25_000_000_000
+    ox.settings.requests_timeout = 600
     # Escape hatch when overpass-api.de throttles a long county run:
-    # OVERPASS_URL=https://overpass.kumi.systems/api/interpreter
+    # OVERPASS_URL=https://lz4.overpass-api.de/api  (osmnx appends /interpreter)
     if os.environ.get("OVERPASS_URL"):
-        ox.settings.overpass_url = os.environ["OVERPASS_URL"]
+        url = os.environ["OVERPASS_URL"].rstrip("/")
+        if url.endswith("/interpreter"):
+            url = url[: -len("/interpreter")]
+        ox.settings.overpass_url = url
 
     points_dir = POINTS_DIR / region.region_id
     points_dir.mkdir(parents=True, exist_ok=True)
@@ -160,6 +272,8 @@ def sample_points_by_county(
         if county_path.exists():
             pts = json.loads(county_path.read_text(encoding="utf-8"))
         else:
+            if i:  # back-to-back county downloads trip Overpass's per-IP limits
+                time.sleep(15)
             t0 = time.monotonic()
             graph = None
             for attempt in range(4):
@@ -471,7 +585,15 @@ def run(
 ) -> None:
     suffix = ".test" if test else ""
 
-    if region.counties and not test:
+    pbf_path = CACHE_DIR / f"{region.region_id}-latest.osm.pbf"
+    if region.counties and not test and pbf_path.exists():
+        print(
+            f"Sampling roads in {region.name} from {pbf_path.name} "
+            f"every {spacing_m:.0f} m ...",
+            flush=True,
+        )
+        points = sample_points_from_pbf(region, spacing_m, pbf_path)
+    elif region.counties and not test:
         print(
             f"Sampling roads in {region.name} across {len(region.counties)} counties "
             f"every {spacing_m:.0f} m ...",

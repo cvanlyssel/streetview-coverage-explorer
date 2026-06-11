@@ -21,6 +21,22 @@ class RegionConfig:
     metric_epsg: int = 32616
 
 
+# All 72 Wisconsin counties, as osmnx/Nominatim place queries.
+_WI_COUNTIES = (
+    "Adams", "Ashland", "Barron", "Bayfield", "Brown", "Buffalo", "Burnett",
+    "Calumet", "Chippewa", "Clark", "Columbia", "Crawford", "Dane", "Dodge",
+    "Door", "Douglas", "Dunn", "Eau Claire", "Florence", "Fond du Lac",
+    "Forest", "Grant", "Green", "Green Lake", "Iowa", "Iron", "Jackson",
+    "Jefferson", "Juneau", "Kenosha", "Kewaunee", "La Crosse", "Lafayette",
+    "Langlade", "Lincoln", "Manitowoc", "Marathon", "Marinette", "Marquette",
+    "Menominee", "Milwaukee", "Monroe", "Oconto", "Oneida", "Outagamie",
+    "Ozaukee", "Pepin", "Pierce", "Polk", "Portage", "Price", "Racine",
+    "Richland", "Rock", "Rusk", "Sauk", "Sawyer", "Shawano", "Sheboygan",
+    "St. Croix", "Taylor", "Trempealeau", "Vernon", "Vilas", "Walworth",
+    "Washburn", "Washington", "Waukesha", "Waupaca", "Waushara", "Winnebago",
+    "Wood",
+)
+
 REGIONS: dict[str, RegionConfig] = {
     "madison": RegionConfig(
         region_id="madison",
@@ -36,5 +52,16 @@ REGIONS: dict[str, RegionConfig] = {
         bbox=(-88.07, 42.92, -87.85, 43.19),
         # Downtown + Third Ward
         test_bbox=(-87.93, 43.02, -87.89, 43.05),
+    ),
+    "wisconsin": RegionConfig(
+        region_id="wisconsin",
+        name="Wisconsin (statewide)",
+        bbox=(-92.89, 42.49, -86.80, 47.08),
+        # Dodgeville area: small rural patch for cheap pipeline checks
+        test_bbox=(-90.02, 42.93, -89.95, 42.99),
+        counties=tuple(f"{c} County, Wisconsin, USA" for c in _WI_COUNTIES),
+        # Wisconsin Transverse Mercator — statewide metric CRS, unlike the
+        # UTM 16N zone the two city regions were sampled in.
+        metric_epsg=3071,
     ),
 }

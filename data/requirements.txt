@@ -5,3 +5,4 @@ geojson
 psycopg2-binary
 h3
 aiohttp
+osmium
