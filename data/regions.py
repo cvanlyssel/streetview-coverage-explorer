@@ -13,6 +13,12 @@ class RegionConfig:
     name: str
     bbox: tuple[float, float, float, float]
     test_bbox: tuple[float, float, float, float]
+    # Statewide regions: osmnx place queries built one at a time (memory-bounded)
+    # instead of one giant bbox graph. Empty = use bbox.
+    counties: tuple[str, ...] = ()
+    # CRS used for metric interpolation along edges. Existing regions keep UTM 16N
+    # (32616) — changing it would shift sampled coords and orphan their caches.
+    metric_epsg: int = 32616
 
 
 REGIONS: dict[str, RegionConfig] = {
