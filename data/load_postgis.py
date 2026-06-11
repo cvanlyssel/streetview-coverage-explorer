@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from datetime import date
@@ -85,12 +86,20 @@ CREATE TABLE IF NOT EXISTS regions (
 
 
 def load_database_url() -> str:
-    for env_path in (DATA_DIR.parent / "backend" / ".env", DATA_DIR / ".env"):
+    """Env var, then data/.env, then backend/.env.
+
+    data/.env outranks backend/.env here (unlike the API) so the deploy flow
+    in docs/DEPLOYMENT_PLAN.md works: production's external URL goes in
+    data/.env while backend/.env keeps pointing dev at the local DB.
+    """
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    for env_path in (DATA_DIR / ".env", DATA_DIR.parent / "backend" / ".env"):
         if env_path.exists():
             url = dotenv_values(env_path).get("DATABASE_URL")
             if url:
                 return url
-    sys.exit("DATABASE_URL not found in backend/.env or data/.env")
+    sys.exit("DATABASE_URL not found in environment, data/.env, or backend/.env")
 
 
 def iter_features(path: Path) -> Iterator[dict]:
