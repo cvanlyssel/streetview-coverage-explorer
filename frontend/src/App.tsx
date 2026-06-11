@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import { fetchGaps, fetchHexbins, fetchPoints, fetchRegions, fetchStats } from './api/client'
 import type {
   GapCollection,
@@ -8,6 +9,7 @@ import type {
   RegionStats,
 } from './api/types'
 import { DetailsPanel } from './components/DetailsPanel'
+import { GlobeLanding } from './components/GlobeLanding'
 import { MapPanel } from './components/MapPanel'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
@@ -140,10 +142,38 @@ function Shell() {
   )
 }
 
+// Globe first, explorer after a marker click (or skip). Entry is plain local
+// navigation state; the store keeps only what the explorer itself uses.
+function Root() {
+  const { setRegionId } = useAppState()
+  const [entered, setEntered] = useState(false)
+
+  if (!entered) {
+    return (
+      <GlobeLanding
+        onEnter={(regionId) => {
+          if (regionId) setRegionId(regionId)
+          setEntered(true)
+        }}
+      />
+    )
+  }
+  return (
+    <motion.div
+      className="h-full"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
+      <Shell />
+    </motion.div>
+  )
+}
+
 function App() {
   return (
     <AppStateProvider>
-      <Shell />
+      <Root />
     </AppStateProvider>
   )
 }
