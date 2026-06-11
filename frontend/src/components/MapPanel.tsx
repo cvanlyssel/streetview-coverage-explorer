@@ -65,8 +65,10 @@ function layersFor(
           getPosition: centroid,
           getWeight: (f) => f.properties.coverage_count,
           colorRange: HEAT_COLOR_RANGE.map(([r, g, b]) => [r, g, b, 255]),
-          radiusPixels: 28,
-          intensity: 1.1,
+          // Tuned for real res-10 hexbins (~114 m cell spacing): tighter radius
+          // keeps individual road corridors legible instead of merging into halo.
+          radiusPixels: 24,
+          intensity: 1.25,
           threshold: 0.05,
           aggregation: 'SUM',
           opacity,

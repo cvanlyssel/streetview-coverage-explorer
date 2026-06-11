@@ -10,7 +10,7 @@ import type {
   RegionStats,
 } from './types'
 
-export const USE_MOCKS = true
+export const USE_MOCKS = false
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
@@ -34,7 +34,9 @@ export async function fetchRegions(): Promise<Region[]> {
   return getJson('/api/regions')
 }
 
-export async function fetchHexbins(region: string, resolution = 8): Promise<HexbinCollection> {
+// H3 res 10 (~114 m cells): fine enough that the heatmap reads as a continuous
+// surface and the polygon layers match the mock's ~200 m grain.
+export async function fetchHexbins(region: string, resolution = 10): Promise<HexbinCollection> {
   if (USE_MOCKS) return getMock(`hexbins.${region}`)
   return getJson(`/api/coverage/hexbins?region=${region}&resolution=${resolution}`)
 }
