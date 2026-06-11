@@ -23,4 +23,12 @@ REGIONS: dict[str, RegionConfig] = {
         # Downtown isthmus + part of campus: dense coverage, quick to sample
         test_bbox=(-89.41, 43.06, -89.365, 43.085),
     ),
+    "milwaukee": RegionConfig(
+        region_id="milwaukee",
+        name="Milwaukee, WI",
+        # Brown Deer down to Oak Creek, lakefront west past Wauwatosa
+        bbox=(-88.07, 42.92, -87.85, 43.19),
+        # Downtown + Third Ward
+        test_bbox=(-87.93, 43.02, -87.89, 43.05),
+    ),
 }
