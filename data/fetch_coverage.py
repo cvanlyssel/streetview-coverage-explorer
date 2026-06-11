@@ -123,7 +123,12 @@ def fetch_metadata(
             body = resp.json()
             status = body.get("status", "UNKNOWN_ERROR")
             if status == "REQUEST_DENIED":
-                sys.exit(f"Street View API request denied: {body.get('error_message', 'check the API key / enabled APIs')}")
+                # Can be transient while billing/API enablement propagates across
+                # Google's frontends — only fatal if every attempt is denied.
+                if attempt == 3:
+                    sys.exit(f"Street View API request denied: {body.get('error_message', 'check the API key / enabled APIs')}")
+                time.sleep(2**attempt)
+                continue
             if status in ("OVER_QUERY_LIMIT", "UNKNOWN_ERROR") or resp.status_code >= 500:
                 time.sleep(2**attempt)
                 continue
