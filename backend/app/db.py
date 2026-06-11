@@ -1,7 +1,13 @@
-"""PostGIS connection handling. DATABASE_URL comes from backend/.env."""
+"""PostGIS connection handling.
+
+DATABASE_URL comes from the environment in production (Render injects it);
+backend/.env is the dev fallback. The env var wins so a deployed instance
+can never silently read a stale .env.
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterator
 
@@ -15,9 +21,11 @@ _pool: psycopg2.pool.SimpleConnectionPool | None = None
 
 
 def database_url() -> str:
-    url = dotenv_values(BACKEND_DIR / ".env").get("DATABASE_URL")
+    url = os.environ.get("DATABASE_URL") or dotenv_values(BACKEND_DIR / ".env").get(
+        "DATABASE_URL"
+    )
     if not url:
-        raise RuntimeError("DATABASE_URL not set in backend/.env")
+        raise RuntimeError("DATABASE_URL not set (env var or backend/.env)")
     return url
 
 

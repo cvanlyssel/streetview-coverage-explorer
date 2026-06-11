@@ -8,6 +8,7 @@ data/load_postgis.py; everything else aggregates coverage_samples on the fly.
 from __future__ import annotations
 
 import json
+import os
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,9 +33,19 @@ from .models import (
 
 app = FastAPI(title="Street View Coverage Explorer API")
 
+# Comma-separated CORS_ORIGINS in production (the Vercel domains);
+# defaults to the local dev pair.
+_cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
