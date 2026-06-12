@@ -77,7 +77,6 @@ function Shell() {
   const [regions, setRegions] = useState<Region[]>([])
   const [stats, setStats] = useState<RegionStats | null>(null)
   const [hexbins, setHexbins] = useState<HexbinCollection | null>(null)
-  const [gaps, setGaps] = useState<GapCollection | null>(null)
   // Keyed by region so a region switch invalidates without a reset effect.
   const [pointsCache, setPointsCache] = useState<{
     regionId: string
@@ -105,13 +104,34 @@ function Shell() {
 
   useEffect(() => {
     fetchStats(regionId).then(setStats).catch(console.error)
-    fetchGaps(regionId).then(setGaps).catch(console.error)
     if (FEATURE_ROUTE_PLANNER) {
       fetchRoutePlan(regionId)
         .then((plan) => setRouteCache({ regionId, plan }))
         .catch(console.error)
     }
   }, [regionId])
+
+  // Gaps stay eager for cities (small), but statewide gap sets run to
+  // ~1M points — fetch those only when the gaps layer is opened.
+  const [gapsCache, setGapsCache] = useState<{
+    regionId: string
+    data: GapCollection
+  } | null>(null)
+  const gaps = gapsCache?.regionId === regionId ? gapsCache.data : null
+  useEffect(() => {
+    if (gaps) return
+    if (isStatewide && activeLayer !== 'gaps') return
+    if (!region && activeLayer !== 'gaps') return // wait for bbox to judge size
+    let stale = false
+    fetchGaps(regionId)
+      .then((data) => {
+        if (!stale) setGapsCache({ regionId, data })
+      })
+      .catch(console.error)
+    return () => {
+      stale = true
+    }
+  }, [regionId, region, isStatewide, activeLayer, gaps])
 
   // Hexbins wait for the region bbox so the resolution fits the region size.
   useEffect(() => {

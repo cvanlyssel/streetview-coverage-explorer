@@ -586,7 +586,8 @@ def run(
     suffix = ".test" if test else ""
 
     pbf_path = CACHE_DIR / f"{region.region_id}-latest.osm.pbf"
-    if region.counties and not test and pbf_path.exists():
+    pbf_points_cached = (POINTS_DIR / f"{region.region_id}.pbf-points.json").exists()
+    if region.counties and not test and (pbf_path.exists() or pbf_points_cached):
         print(
             f"Sampling roads in {region.name} from {pbf_path.name} "
             f"every {spacing_m:.0f} m ...",
