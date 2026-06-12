@@ -346,6 +346,7 @@ export function MapPanel({
   points,
   stats,
   routePlan,
+  timelapseAvailable,
 }: {
   region: Region | null
   hexbins: HexbinCollection | null
@@ -353,6 +354,7 @@ export function MapPanel({
   points: PointCollection | null
   stats: RegionStats | null
   routePlan: RoutePlan | null
+  timelapseAvailable: boolean
 }) {
   const { activeLayer, routeVisible } = useAppState()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -471,7 +473,18 @@ export function MapPanel({
       <div ref={containerRef} className="h-full w-full" />
       <Legend layerId={activeLayer} />
       <AnimatePresence>
-        {activeLayer === 'timelapse' && yearRange && stats && (
+        {activeLayer === 'timelapse' && !timelapseAvailable && (
+          <motion.div
+            key="timelapse-unavailable"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            className="absolute bottom-7 left-1/2 z-10 -translate-x-1/2 rounded-md border border-white/10 bg-[#14161c]/90 px-3.5 py-2.5 text-[11px] text-zinc-400 backdrop-blur"
+          >
+            Time-lapse needs per-point data — switch to a city region like Madison.
+          </motion.div>
+        )}
+        {activeLayer === 'timelapse' && timelapseAvailable && yearRange && stats && (
           <TimelapseControl
             key="timelapse-control"
             minYear={yearRange[0]}

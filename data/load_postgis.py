@@ -163,25 +163,24 @@ class HexAccumulator:
                 cell[4] = min(cell[4] or d, d)
                 cell[5] = max(cell[5], d)
 
-    def rows(self, region_id: str) -> Iterator[tuple]:
-        for res in self.resolutions:
-            cells = self.cells[res]
-            if not cells:
-                continue
-            max_count = max(c[0] for c in cells.values())
-            for hex_id, (count, age_sum, age_n, google_n, dmin, dmax) in cells.items():
-                yield (
-                    region_id,
-                    res,
-                    hex_id,
-                    count,
-                    count / max_count,
-                    round(age_sum / age_n, 2) if age_n else 0.0,
-                    dmin,
-                    dmax,
-                    google_n / count,
-                    hex_wkt(hex_id),
-                )
+    def rows_for(self, region_id: str, res: int) -> Iterator[tuple]:
+        cells = self.cells.get(res, {})
+        if not cells:
+            return
+        max_count = max(c[0] for c in cells.values())
+        for hex_id, (count, age_sum, age_n, google_n, dmin, dmax) in cells.items():
+            yield (
+                region_id,
+                res,
+                hex_id,
+                count,
+                count / max_count,
+                round(age_sum / age_n, 2) if age_n else 0.0,
+                dmin,
+                dmax,
+                google_n / count,
+                hex_wkt(hex_id),
+            )
 
 
 def _names_from_edges(edges, gap_gdf) -> dict[int, str]:
@@ -268,25 +267,57 @@ def main() -> None:
         action="store_true",
         help="Skip the osmnx nearest-road join for gaps (API falls back to 'Unnamed road')",
     )
+    parser.add_argument(
+        "--hex-resolutions",
+        default=None,
+        help="Comma-separated H3 resolutions, overriding the per-region default",
+    )
+    parser.add_argument(
+        "--subsample",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Insert every Nth sample row (uniform across OK and gaps, so live "
+        "stats like coverage_pct stay unbiased; hexbins still aggregate ALL "
+        "samples). For size-capped targets like the free prod tier.",
+    )
+    parser.add_argument(
+        "--only",
+        choices=("all", "samples", "hexbins"),
+        default="all",
+        help="Load only one side. Lets a size-capped target take hexbins "
+        "first, then fill the remaining budget with subsampled samples.",
+    )
+    parser.add_argument(
+        "--budget-mb",
+        type=int,
+        default=None,
+        help="Stop adding hexbin resolutions once pg_database_size passes this "
+        "(checked between resolutions; they insert coarse-to-fine).",
+    )
     args = parser.parse_args()
     region = REGIONS[args.region]
     today = date.today()
     resolutions = STATEWIDE_HEX_RESOLUTIONS if region.counties else CITY_HEX_RESOLUTIONS
+    if args.hex_resolutions:
+        resolutions = tuple(int(r) for r in args.hex_resolutions.split(","))
+    resolutions = tuple(sorted(resolutions))  # coarse-to-fine for --budget-mb
 
     geojson_path = Path(args.file)
     if not geojson_path.is_absolute():
         geojson_path = DATA_DIR / geojson_path
 
     # Pass 1: gap coordinates only (cheap), so names exist before the insert.
-    gaps = [
-        (i, f["geometry"]["coordinates"][0], f["geometry"]["coordinates"][1])
-        for i, f in enumerate(iter_features(geojson_path))
-        if f["properties"]["status"] == "ZERO_RESULTS"
-    ]
     gap_names: dict[int, str] = {}
-    if gaps and not args.skip_road_names:
-        print(f"Resolving road names for {len(gaps):,} gap points ...")
-        gap_names = nearest_road_names(region, gaps)
+    if args.only != "hexbins" and not args.skip_road_names:
+        gaps = [
+            (i, f["geometry"]["coordinates"][0], f["geometry"]["coordinates"][1])
+            for i, f in enumerate(iter_features(geojson_path))
+            if f["properties"]["status"] == "ZERO_RESULTS"
+        ]
+        if gaps:
+            print(f"Resolving road names for {len(gaps):,} gap points ...")
+            gap_names = nearest_road_names(region, gaps)
 
     # keepalives: remote (Render) loads stream for minutes; idle gaps during
     # local hexbin WKT generation otherwise let middleboxes drop the TLS link.
@@ -300,116 +331,134 @@ def main() -> None:
         keepalives_count=5,
         ssl_max_protocol_version="TLSv1.2",
     )
-    accum = HexAccumulator(resolutions)
-    total = 0
+    accum = HexAccumulator(resolutions if args.only != "samples" else ())
+    inserted = 0
+    full_total = 0
+    HEX_INSERT_SQL = """
+        INSERT INTO coverage_hexbins
+            (region, resolution, hex_id, coverage_count, coverage_density,
+             avg_age_years, oldest_date, newest_date, official_ratio, geom)
+        VALUES %s
+    """
+    HEX_TEMPLATE = "(%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))"
+
+    def db_size_mb(cur) -> int:
+        cur.execute("SELECT pg_database_size(current_database())")
+        return cur.fetchone()[0] // (1024 * 1024)
+
     try:
-        with conn, conn.cursor() as cur:
-            cur.execute(DDL)
+        cur = conn.cursor()
+        cur.execute(DDL)
+        if args.only != "hexbins":
             cur.execute("DELETE FROM coverage_samples WHERE region = %s", (args.region,))
 
-            # Pass 2: stream inserts + hexbin accumulation in one walk.
-            batch: list[tuple] = []
+        # Pass 2: stream sample inserts + hexbin accumulation in one walk.
+        batch: list[tuple] = []
 
-            def flush() -> None:
-                psycopg2.extras.execute_values(
-                    cur,
-                    """
-                    INSERT INTO coverage_samples
-                        (region, pano_id, date, source, status, nearest_road, geom)
-                    VALUES %s
-                    """,
-                    batch,
-                    template="(%s, %s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
-                    page_size=200,  # smaller TLS records: see connect() note
-                )
-                batch.clear()
+        def flush() -> None:
+            psycopg2.extras.execute_values(
+                cur,
+                """
+                INSERT INTO coverage_samples
+                    (region, pano_id, date, source, status, nearest_road, geom)
+                VALUES %s
+                """,
+                batch,
+                template="(%s, %s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
+                page_size=200,  # smaller TLS records: see connect() note
+            )
+            batch.clear()
 
-            for i, f in enumerate(iter_features(geojson_path)):
-                p = f["properties"]
-                accum.add(p, today)
-                batch.append(
-                    (
-                        args.region,
-                        p["pano_id"] or None,
-                        p["date"] or None,
-                        p["source"],
-                        p["status"],
-                        gap_names.get(i),
-                        f["geometry"]["coordinates"][0],
-                        f["geometry"]["coordinates"][1],
-                    )
+        for i, f in enumerate(iter_features(geojson_path)):
+            p = f["properties"]
+            accum.add(p, today)  # hexbins aggregate every sample, never subsampled
+            full_total += 1
+            if args.only == "hexbins":
+                continue
+            if args.subsample > 1 and i % args.subsample != 0:
+                continue
+            batch.append(
+                (
+                    args.region,
+                    p["pano_id"] or None,
+                    p["date"] or None,
+                    p["source"],
+                    p["status"],
+                    gap_names.get(i),
+                    f["geometry"]["coordinates"][0],
+                    f["geometry"]["coordinates"][1],
                 )
-                total += 1
-                if len(batch) >= INSERT_BATCH:
-                    flush()
-                    if total % 500_000 == 0:
-                        print(f"  {total:,} samples inserted ...", flush=True)
-            if batch:
+            )
+            inserted += 1
+            if len(batch) >= INSERT_BATCH:
                 flush()
-            print(f"Inserted {total:,} samples; writing hexbins at {resolutions} ...")
+                if inserted % 500_000 == 0:
+                    print(f"  {inserted:,} samples inserted ...", flush=True)
+        if batch:
+            flush()
+        conn.commit()
+        sub_note = f" (1/{args.subsample} subsample)" if args.subsample > 1 else ""
+        print(f"Walked {full_total:,} features; inserted {inserted:,} samples{sub_note}")
 
+        if args.only != "samples":
             cur.execute("DELETE FROM coverage_hexbins WHERE region = %s", (args.region,))
-            hex_batch: list[tuple] = []
-            hex_total = 0
-            for row in accum.rows(args.region):
-                hex_batch.append(row)
-                hex_total += 1
-                if len(hex_batch) >= 2_000:
-                    psycopg2.extras.execute_values(
-                        cur,
-                        """
-                        INSERT INTO coverage_hexbins
-                            (region, resolution, hex_id, coverage_count, coverage_density,
-                             avg_age_years, oldest_date, newest_date, official_ratio, geom)
-                        VALUES %s
-                        """,
-                        hex_batch,
-                        template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))",
-                        page_size=500,
+            # One commit per resolution, coarse-to-fine, so a budget stop
+            # keeps every fully-loaded resolution.
+            for res in resolutions:
+                if args.budget_mb is not None and db_size_mb(cur) >= args.budget_mb:
+                    print(
+                        f"  budget {args.budget_mb} MB reached — skipping res {res}+",
+                        flush=True,
                     )
-                    hex_batch.clear()
-            if hex_batch:
-                psycopg2.extras.execute_values(
-                    cur,
-                    """
-                    INSERT INTO coverage_hexbins
-                        (region, resolution, hex_id, coverage_count, coverage_density,
-                         avg_age_years, oldest_date, newest_date, official_ratio, geom)
-                    VALUES %s
-                    """,
-                    hex_batch,
-                    template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, ST_GeomFromText(%s, 4326))",
-                    page_size=500,
-                )
+                    break
+                hex_batch: list[tuple] = []
+                n_cells = 0
+                for row in accum.rows_for(args.region, res):
+                    hex_batch.append(row)
+                    n_cells += 1
+                    if len(hex_batch) >= 2_000:
+                        psycopg2.extras.execute_values(
+                            cur, HEX_INSERT_SQL, hex_batch, template=HEX_TEMPLATE, page_size=500
+                        )
+                        hex_batch.clear()
+                if hex_batch:
+                    psycopg2.extras.execute_values(
+                        cur, HEX_INSERT_SQL, hex_batch, template=HEX_TEMPLATE, page_size=500
+                    )
+                conn.commit()
+                print(f"  hexbins res {res}: {n_cells:,} cells committed", flush=True)
 
-            cur.execute(
-                """
-                INSERT INTO regions
-                    (region_id, name, west, south, east, north, point_count, last_updated)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (region_id) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    west = EXCLUDED.west, south = EXCLUDED.south,
-                    east = EXCLUDED.east, north = EXCLUDED.north,
-                    point_count = EXCLUDED.point_count,
-                    last_updated = EXCLUDED.last_updated
-                """,
-                (args.region, region.name, *region.bbox, total, today),
-            )
+        # point_count is the TRUE sampled total even when rows are subsampled
+        cur.execute(
+            """
+            INSERT INTO regions
+                (region_id, name, west, south, east, north, point_count, last_updated)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (region_id) DO UPDATE SET
+                name = EXCLUDED.name,
+                west = EXCLUDED.west, south = EXCLUDED.south,
+                east = EXCLUDED.east, north = EXCLUDED.north,
+                point_count = EXCLUDED.point_count,
+                last_updated = EXCLUDED.last_updated
+            """,
+            (args.region, region.name, *region.bbox, full_total, today),
+        )
+        conn.commit()
 
-            cur.execute(
-                "SELECT count(*) FROM coverage_samples WHERE region = %s", (args.region,)
-            )
-            print(f"coverage_samples: {cur.fetchone()[0]:,} rows for region={args.region}")
-            cur.execute(
-                """
-                SELECT resolution, count(*) FROM coverage_hexbins
-                WHERE region = %s GROUP BY resolution ORDER BY resolution
-                """,
-                (args.region,),
-            )
-            for res, n in cur.fetchall():
-                print(f"coverage_hexbins res {res}: {n:,} cells")
+        cur.execute(
+            "SELECT count(*) FROM coverage_samples WHERE region = %s", (args.region,)
+        )
+        print(f"coverage_samples: {cur.fetchone()[0]:,} rows for region={args.region}")
+        cur.execute(
+            """
+            SELECT resolution, count(*) FROM coverage_hexbins
+            WHERE region = %s GROUP BY resolution ORDER BY resolution
+            """,
+            (args.region,),
+        )
+        for res, n in cur.fetchall():
+            print(f"coverage_hexbins res {res}: {n:,} cells")
+        print(f"database size: {db_size_mb(cur)} MB")
     finally:
         conn.close()
 

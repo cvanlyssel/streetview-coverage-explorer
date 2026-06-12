@@ -96,9 +96,15 @@ function Shell() {
   } | null>(null)
   const routePlan = routeCache?.regionId === regionId ? routeCache.plan : null
 
+  const region = regions.find((r) => r.id === regionId) ?? null
+  // Statewide regions get coarse hexes and no per-point time-lapse: res-10
+  // cells / raw points over a whole state are payloads no browser wants.
+  const isStatewide = region
+    ? (region.bbox[2] - region.bbox[0]) * (region.bbox[3] - region.bbox[1]) > 1
+    : false
+
   useEffect(() => {
     fetchStats(regionId).then(setStats).catch(console.error)
-    fetchHexbins(regionId).then(setHexbins).catch(console.error)
     fetchGaps(regionId).then(setGaps).catch(console.error)
     if (FEATURE_ROUTE_PLANNER) {
       fetchRoutePlan(regionId)
@@ -107,10 +113,24 @@ function Shell() {
     }
   }, [regionId])
 
+  // Hexbins wait for the region bbox so the resolution fits the region size.
+  useEffect(() => {
+    if (!region) return
+    let stale = false
+    fetchHexbins(region.id, isStatewide ? 7 : 10)
+      .then((h) => {
+        if (!stale) setHexbins(h)
+      })
+      .catch(console.error)
+    return () => {
+      stale = true
+    }
+  }, [region, isStatewide])
+
   // Per-point data is heavy (10s of MB for a full region), so it loads only
   // once the time-lapse layer is opened, then sticks for the region.
   useEffect(() => {
-    if (activeLayer !== 'timelapse' || points) return
+    if (activeLayer !== 'timelapse' || points || isStatewide) return
     let stale = false
     fetchPoints(regionId)
       .then((data) => {
@@ -120,9 +140,7 @@ function Shell() {
     return () => {
       stale = true
     }
-  }, [activeLayer, regionId, points])
-
-  const region = regions.find((r) => r.id === regionId) ?? null
+  }, [activeLayer, regionId, points, isStatewide])
 
   return (
     <div className="h-full bg-[#c8ccd6] p-3 lg:p-4">
@@ -160,6 +178,7 @@ function Shell() {
                 points={points}
                 stats={stats}
                 routePlan={routePlan}
+                timelapseAvailable={!isStatewide}
               />
               <DetailsPanel stats={stats} />
             </div>
