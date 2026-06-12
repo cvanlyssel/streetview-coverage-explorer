@@ -323,14 +323,19 @@ def main() -> None:
     # local hexbin WKT generation otherwise let middleboxes drop the TLS link.
     # TLS capped at 1.2: sustained bulk writes from Windows OpenSSL over
     # TLS 1.3 die with "ssl/tls alert bad record mac" (seen twice mid-insert).
-    conn = psycopg2.connect(
-        load_database_url(),
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
-        ssl_max_protocol_version="TLSv1.2",
-    )
+    # Long statewide writes still drop occasionally, so the hexbin pass
+    # reconnects and retries per resolution.
+    def fresh_conn():
+        return psycopg2.connect(
+            load_database_url(),
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
+            ssl_max_protocol_version="TLSv1.2",
+        )
+
+    conn = fresh_conn()
     accum = HexAccumulator(resolutions if args.only != "samples" else ())
     inserted = 0
     full_total = 0
@@ -346,26 +351,59 @@ def main() -> None:
         cur.execute("SELECT pg_database_size(current_database())")
         return cur.fetchone()[0] // (1024 * 1024)
 
+    state = {"conn": conn, "cur": conn.cursor()}
+
+    def reconnect() -> None:
+        try:
+            state["conn"].close()
+        except Exception:
+            pass
+        state["conn"] = fresh_conn()
+        state["cur"] = state["conn"].cursor()
+
+    def insert_committed(sql: str, rows: list[tuple], template: str) -> None:
+        """One batch -> one commit, reconnecting and re-executing on drops.
+
+        The TLS link to Render reliably corrupts somewhere past ~30 MB of
+        writes on one connection ("bad record mac"); durable small commits
+        plus reconnect make total written volume irrelevant.
+        """
+        for attempt in range(6):
+            try:
+                psycopg2.extras.execute_values(
+                    state["cur"], sql, rows, template=template, page_size=200
+                )
+                state["conn"].commit()
+                return
+            except psycopg2.OperationalError as exc:
+                if attempt == 5:
+                    raise
+                print(
+                    f"  connection dropped ({str(exc).strip()[:50]}); "
+                    f"reconnecting (attempt {attempt + 1}) ...",
+                    flush=True,
+                )
+                reconnect()
+
     try:
-        cur = conn.cursor()
+        cur = state["cur"]
         cur.execute(DDL)
         if args.only != "hexbins":
             cur.execute("DELETE FROM coverage_samples WHERE region = %s", (args.region,))
+        state["conn"].commit()
 
         # Pass 2: stream sample inserts + hexbin accumulation in one walk.
         batch: list[tuple] = []
 
         def flush() -> None:
-            psycopg2.extras.execute_values(
-                cur,
+            insert_committed(
                 """
                 INSERT INTO coverage_samples
                     (region, pano_id, date, source, status, nearest_road, geom)
                 VALUES %s
                 """,
                 batch,
-                template="(%s, %s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
-                page_size=200,  # smaller TLS records: see connect() note
+                "(%s, %s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))",
             )
             batch.clear()
 
@@ -396,39 +434,59 @@ def main() -> None:
                     print(f"  {inserted:,} samples inserted ...", flush=True)
         if batch:
             flush()
-        conn.commit()
         sub_note = f" (1/{args.subsample} subsample)" if args.subsample > 1 else ""
         print(f"Walked {full_total:,} features; inserted {inserted:,} samples{sub_note}")
 
         if args.only != "samples":
-            cur.execute("DELETE FROM coverage_hexbins WHERE region = %s", (args.region,))
             # One commit per resolution, coarse-to-fine, so a budget stop
-            # keeps every fully-loaded resolution.
+            # keeps every fully-loaded resolution. Each resolution deletes
+            # only its own rows, retries on dropped connections, and skips
+            # itself if a previous run already loaded it completely.
             for res in resolutions:
+                cur = state["cur"]
                 if args.budget_mb is not None and db_size_mb(cur) >= args.budget_mb:
                     print(
                         f"  budget {args.budget_mb} MB reached — skipping res {res}+",
                         flush=True,
                     )
                     break
+                expected = len(accum.cells.get(res, {}))
+                cur.execute(
+                    "SELECT count(*) FROM coverage_hexbins WHERE region = %s AND resolution = %s",
+                    (args.region, res),
+                )
+                existing = cur.fetchone()[0]
+                if existing == expected and expected > 0:
+                    print(f"  hexbins res {res}: already complete, skipping", flush=True)
+                    continue
+                if existing > expected:
+                    cur.execute(
+                        "DELETE FROM coverage_hexbins WHERE region = %s AND resolution = %s",
+                        (args.region, res),
+                    )
+                    state["conn"].commit()
+                    existing = 0
+                if existing:
+                    # accum iteration order is deterministic (dict insertion
+                    # order from the file walk), so a row count is a cursor.
+                    print(f"  hexbins res {res}: resuming after {existing:,} rows", flush=True)
+
                 hex_batch: list[tuple] = []
                 n_cells = 0
                 for row in accum.rows_for(args.region, res):
-                    hex_batch.append(row)
                     n_cells += 1
+                    if n_cells <= existing:
+                        continue
+                    hex_batch.append(row)
                     if len(hex_batch) >= 2_000:
-                        psycopg2.extras.execute_values(
-                            cur, HEX_INSERT_SQL, hex_batch, template=HEX_TEMPLATE, page_size=500
-                        )
+                        insert_committed(HEX_INSERT_SQL, hex_batch, HEX_TEMPLATE)
                         hex_batch.clear()
                 if hex_batch:
-                    psycopg2.extras.execute_values(
-                        cur, HEX_INSERT_SQL, hex_batch, template=HEX_TEMPLATE, page_size=500
-                    )
-                conn.commit()
+                    insert_committed(HEX_INSERT_SQL, hex_batch, HEX_TEMPLATE)
                 print(f"  hexbins res {res}: {n_cells:,} cells committed", flush=True)
 
         # point_count is the TRUE sampled total even when rows are subsampled
+        cur = state["cur"]  # rebind: passes above may have reconnected
         cur.execute(
             """
             INSERT INTO regions
@@ -443,7 +501,7 @@ def main() -> None:
             """,
             (args.region, region.name, *region.bbox, full_total, today),
         )
-        conn.commit()
+        state["conn"].commit()
 
         cur.execute(
             "SELECT count(*) FROM coverage_samples WHERE region = %s", (args.region,)
@@ -460,7 +518,7 @@ def main() -> None:
             print(f"coverage_hexbins res {res}: {n:,} cells")
         print(f"database size: {db_size_mb(cur)} MB")
     finally:
-        conn.close()
+        state["conn"].close()
 
 
 if __name__ == "__main__":

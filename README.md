@@ -1,9 +1,10 @@
 # Street View Coverage Explorer
 
-**An interactive dashboard for the Google Street View *coverage meta* — built on 192,559 real
-measurements of every drivable road in Madison and Milwaukee, WI.**
+**An interactive dashboard for the Google Street View *coverage meta* — built on 4,449,692 real
+measurements of every drivable road in Wisconsin, with street-level deep dives into Madison
+and Milwaukee.**
 
-![Coverage density over Madison's real road network](docs/screenshots/density.png)
+![Coverage density across every drivable road in Wisconsin](docs/screenshots/wisconsin-density.png)
 
 Not the imagery — the *metadata*. Where Street View exists, how stale it is, whether it came
 from a Google car or someone's photosphere, and which roads have no coverage at all: the
@@ -12,6 +13,29 @@ questions GeoGuessr map-makers and geodata nerds actually ask.
 > **Live demo: [streetview-coverage-explorer.vercel.app](https://streetview-coverage-explorer.vercel.app)**
 > The API runs on a free tier that sleeps when idle — the first load may take
 > ~30–60 s to wake it. Architecture in [docs/DEPLOYMENT_PLAN.md](docs/DEPLOYMENT_PLAN.md).
+
+## The headline: Wisconsin, statewide
+
+Every drivable road in the state — 306,161 OSM ways — sampled every 50 meters and checked
+against Google's metadata endpoint over a ~24-hour, 4.26-million-request run:
+
+| | |
+| --- | --- |
+| Road sample points | **4,257,133** |
+| With Street View coverage | **3,069,407 (72.1%)** |
+| Roads with no coverage | **1,187,726 points** — almost entirely rural |
+| Official (Google car/trekker) | **99.3%** of covered points |
+| Average imagery age | **2.6 years** |
+| Oldest panorama still served | **June 2007** |
+
+The cities are near-fully covered (Madison 97.6%, Milwaukee 99.8%) — but switch to the
+statewide gaps layer and Wisconsin turns red: more than a quarter of the state's road
+network has never seen a Street View car.
+
+| Coverage gaps, statewide | Imagery age, statewide |
+| --- | --- |
+| ![Wisconsin gaps](docs/screenshots/wisconsin-gaps.png) | ![Wisconsin age](docs/screenshots/wisconsin-age.png) |
+| *Red = drivable road, no Street View. Cities are the dark holes.* | *Yellow pockets = imagery untouched since ~2007–2011* |
 
 ## The real numbers (Madison, WI)
 
@@ -31,10 +55,17 @@ The 2025 city-wide recapture dominates (41,798 of 51,189 covered points), but po
 2007–2011 imagery survive — and the coverage gaps map almost perfectly onto subdivisions
 built after Google's last drive.
 
-A second region — **Milwaukee: 140,109 points, 99.8% covered, avg age 2.2 years** — runs
+A second city region — **Milwaukee: 140,109 points, 99.8% covered, avg age 2.2 years** — runs
 through the identical pipeline; switch regions in the app and the map flies between them.
+The app opens on a deck.gl globe of worldwide coverage and includes a time-lapse layer
+that animates 19 years of capture history (city regions).
 
 ![Milwaukee coverage density](docs/screenshots/milwaukee-density.png)
+
+> Production note: the statewide region serves full-resolution hexbin aggregates (H3 res
+> 7–10, 1.54M cells) but an evenly subsampled 1-in-3 set of raw sample points, to fit the
+> free database tier. Percentages are unbiased; the region's true point count is shown in
+> the region list. Local loads carry the full 4.26M rows.
 
 ## The four layers
 
