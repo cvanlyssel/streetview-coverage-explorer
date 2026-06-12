@@ -1,25 +1,28 @@
 # Scaling to the full USA — extrapolation memo
 
-Based on the Wisconsin statewide run (4,257,143 points, launched 2026-06-11).
-Observed numbers below are from the first 2.85M requests; final totals will be
-appended when the run completes (it has been statistically flat throughout).
+Based on the completed Wisconsin statewide run (4,257,143 points,
+2026-06-11 → 2026-06-12).
 
-## Observed (Wisconsin, 50 req/s target)
+## Observed (Wisconsin, 50 req/s target — final)
 
 | Metric | Value |
 | --- | --- |
-| Sustained throughput | **50.0–50.3 req/s** (never below target − 1%) |
-| Failures (exhausted retries) | **6 / 2,854,858 = 0.0002%** |
-| Transient throttle signals | 57 (0.002%) — zero adaptive rate halvings triggered |
-| Wall time projection | ~23.6 h for 4.26M points |
-| Cache (JSONL) | 157 B/response avg (rural-heavy; urban ~207 B) |
-| Output GeoJSON | ~253 B/feature |
+| Requests completed | **4,257,135** (~23.7 h of request time at 50 req/s) |
+| Sustained throughput | **49.9–50.3 req/s**, never below target − 1% |
+| Failures (exhausted retries) | **8 = 0.0002%** |
+| Transient throttle signals | 76 (0.002%) — zero adaptive rate halvings triggered |
+| Cache (JSONL) | 660 MB ≈ 157 B/response (rural-heavy; urban ~207 B) |
+| Output GeoJSON | 1.04 GB ≈ 245 B/feature |
 | API cost | $0 — the Street View *metadata* endpoint is not billed |
 
-Notes: 50 workers behind a shared pacer; the endpoint showed no sign of
-caring at this rate. The cap in `fetch_coverage.py` is 100 req/s; a brief
-controlled test at 100 is the obvious next experiment before any multi-state
-run (expect ~2× everything below if it holds).
+Result preview: statewide coverage is **72.1%** (vs 97.6% Madison, 99.8%
+Milwaukee) — 1.19M road points with no Street View, almost all rural.
+
+Operational note: the only crash in ~24 h was the local disk filling up;
+the per-line-flushed cache resumed with zero loss (998 requests redone).
+50 workers behind a shared pacer; the endpoint never pushed back. The cap in
+`fetch_coverage.py` is 100 req/s; a brief controlled test at 100 is the
+obvious next experiment before any multi-state run (expect ~2× below).
 
 ## Projection: all 50 states + DC
 
