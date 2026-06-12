@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { fetchGaps, fetchHexbins, fetchPoints, fetchRegions, fetchStats } from './api/client'
+import {
+  FEATURE_ROUTE_PLANNER,
+  fetchGaps,
+  fetchHexbins,
+  fetchPoints,
+  fetchRegions,
+  fetchRoutePlan,
+  fetchStats,
+} from './api/client'
 import type {
   GapCollection,
   HexbinCollection,
   PointCollection,
   Region,
   RegionStats,
+  RoutePlan,
 } from './api/types'
 import { DetailsPanel } from './components/DetailsPanel'
 import { GlobeLanding } from './components/GlobeLanding'
@@ -80,10 +89,22 @@ function Shell() {
     fetchRegions().then(setRegions).catch(console.error)
   }, [])
 
+  // Keyed by region: null plan = endpoint said "not planned" for this region.
+  const [routeCache, setRouteCache] = useState<{
+    regionId: string
+    plan: RoutePlan | null
+  } | null>(null)
+  const routePlan = routeCache?.regionId === regionId ? routeCache.plan : null
+
   useEffect(() => {
     fetchStats(regionId).then(setStats).catch(console.error)
     fetchHexbins(regionId).then(setHexbins).catch(console.error)
     fetchGaps(regionId).then(setGaps).catch(console.error)
+    if (FEATURE_ROUTE_PLANNER) {
+      fetchRoutePlan(regionId)
+        .then((plan) => setRouteCache({ regionId, plan }))
+        .catch(console.error)
+    }
   }, [regionId])
 
   // Per-point data is heavy (10s of MB for a full region), so it loads only
@@ -106,7 +127,7 @@ function Shell() {
   return (
     <div className="h-full bg-[#c8ccd6] p-3 lg:p-4">
       <div className="flex h-full overflow-hidden rounded-xl bg-[#14161c] shadow-2xl shadow-black/40">
-        <Sidebar stats={stats} />
+        <Sidebar stats={stats} routePlan={routePlan} />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
@@ -132,7 +153,14 @@ function Shell() {
             </div>
 
             <div className="flex min-h-0 flex-1 gap-3">
-              <MapPanel region={region} hexbins={hexbins} gaps={gaps} points={points} stats={stats} />
+              <MapPanel
+                region={region}
+                hexbins={hexbins}
+                gaps={gaps}
+                points={points}
+                stats={stats}
+                routePlan={routePlan}
+              />
               <DetailsPanel stats={stats} />
             </div>
           </main>

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapboxOverlay } from '@deck.gl/mapbox'
-import { PolygonLayer, ScatterplotLayer } from '@deck.gl/layers'
+import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import { DataFilterExtension, type DataFilterExtensionProps } from '@deck.gl/extensions'
 import { animate, AnimatePresence, motion } from 'framer-motion'
@@ -16,11 +16,14 @@ import type {
   GapProperties,
   HexbinCollection,
   HexbinProperties,
+  LineStringGeometry,
   PointCollection,
   PointGeometry,
   PolygonGeometry,
   Region,
   RegionStats,
+  RouteFeatureProperties,
+  RoutePlan,
 } from '../api/types'
 import {
   AGE_GRADIENT_CSS,
@@ -57,7 +60,15 @@ interface TimelapseState {
   minYear: number
 }
 
-type PickedFeature = HexFeature | GapPointFeature | TimelapsePoint
+type RouteStopFeature = Feature<PointGeometry, RouteFeatureProperties>
+type RouteLegFeature = Feature<LineStringGeometry, RouteFeatureProperties>
+
+type PickedFeature =
+  | HexFeature
+  | GapPointFeature
+  | TimelapsePoint
+  | RouteStopFeature
+  | RouteLegFeature
 
 const NOW_YEAR = new Date().getFullYear()
 
@@ -175,6 +186,51 @@ function layersFor(
   }
 }
 
+// Route overlay (feature-flagged): blue path under numbered stop markers.
+function routeLayers(plan: RoutePlan) {
+  const stops = plan.route.features.filter(
+    (f): f is RouteStopFeature => f.properties.kind === 'stop',
+  )
+  const legs = plan.route.features.filter(
+    (f): f is RouteLegFeature => f.properties.kind === 'leg',
+  )
+  return [
+    new PathLayer<RouteLegFeature>({
+      id: 'route-legs',
+      data: legs,
+      getPath: (f) => f.geometry.coordinates as [number, number][],
+      getColor: [56, 189, 248, 200],
+      getWidth: 3.5,
+      widthUnits: 'pixels',
+      capRounded: true,
+      jointRounded: true,
+      pickable: true,
+    }),
+    new ScatterplotLayer<RouteStopFeature>({
+      id: 'route-stops',
+      data: stops,
+      getPosition: (f) => f.geometry.coordinates,
+      getFillColor: [16, 185, 129, 255],
+      getLineColor: [255, 255, 255, 220],
+      stroked: true,
+      lineWidthMinPixels: 1.5,
+      radiusMinPixels: 7,
+      radiusMaxPixels: 11,
+      pickable: true,
+    }),
+    new TextLayer<RouteStopFeature>({
+      id: 'route-stop-numbers',
+      data: stops,
+      getPosition: (f) => f.geometry.coordinates,
+      getText: (f) => String(f.properties.order),
+      getSize: 10,
+      getColor: [255, 255, 255, 255],
+      fontFamily: 'system-ui, sans-serif',
+      fontWeight: 700,
+    }),
+  ]
+}
+
 function tooltipFor(object: PickedFeature | null) {
   if (!object) return null
   if ('year' in object) {
@@ -187,6 +243,20 @@ function tooltipFor(object: PickedFeature | null) {
     }
   }
   const p = object.properties
+  if ('kind' in p) {
+    const html =
+      p.kind === 'stop'
+        ? `
+          <div style="font-weight:600;margin-bottom:2px;color:#6ee7b7">Stop ${p.order}</div>
+          <div>${p.road}</div>
+          <div style="color:#9ca3af">${p.gap_count} gap point${p.gap_count === 1 ? '' : 's'}</div>
+        `
+        : `
+          <div style="font-weight:600;color:#7dd3fc">Leg ${p.order}</div>
+          <div style="color:#9ca3af">${p.length_km} km</div>
+        `
+    return { html, style: TOOLTIP_STYLE }
+  }
   const html =
     'nearest_road' in p
       ? `
@@ -275,14 +345,16 @@ export function MapPanel({
   gaps,
   points,
   stats,
+  routePlan,
 }: {
   region: Region | null
   hexbins: HexbinCollection | null
   gaps: GapCollection | null
   points: PointCollection | null
   stats: RegionStats | null
+  routePlan: RoutePlan | null
 }) {
-  const { activeLayer } = useAppState()
+  const { activeLayer, routeVisible } = useAppState()
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const overlayRef = useRef<MapboxOverlay | null>(null)
@@ -352,8 +424,9 @@ export function MapPanel({
     const out = []
     if (fade.prev) out.push(...layersFor(fade.prev, hexbins, gaps, timelapse, 1 - fade.t, false))
     out.push(...layersFor(activeLayer, hexbins, gaps, timelapse, fade.t, true))
+    if (routeVisible && routePlan) out.push(...routeLayers(routePlan))
     return out
-  }, [hexbins, gaps, timelapse, activeLayer, fade])
+  }, [hexbins, gaps, timelapse, activeLayer, fade, routeVisible, routePlan])
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return

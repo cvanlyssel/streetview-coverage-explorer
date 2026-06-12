@@ -1,7 +1,8 @@
 // Left control panel: brand, layer toggles (single active layer), KPI cards.
 
 import { AnimatePresence, motion } from 'framer-motion'
-import type { RegionStats } from '../api/types'
+import { routePlanGpxUrl } from '../api/client'
+import type { RegionStats, RoutePlan } from '../api/types'
 import { LAYERS, useAppState } from '../state/store'
 import { CountUp } from './CountUp'
 
@@ -93,7 +94,68 @@ function KpiCard({
   )
 }
 
-export function Sidebar({ stats }: { stats: RegionStats | null }) {
+function formatMinutes(min: number): string {
+  const h = Math.floor(min / 60)
+  return h > 0 ? `${h} h ${min % 60} min` : `${min} min`
+}
+
+// Feature-flagged Gap Route overlay: toggle row + stats card (ROUTE_PLANNER.md)
+function RoutePanel({ plan }: { plan: RoutePlan }) {
+  const { routeVisible, setRouteVisible } = useAppState()
+  return (
+    <div className="mt-5">
+      <button
+        type="button"
+        onClick={() => setRouteVisible(!routeVisible)}
+        className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
+          routeVisible
+            ? 'bg-white/[0.07] font-medium text-white'
+            : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200'
+        }`}
+      >
+        <span>Gap Route</span>
+        {routeVisible ? (
+          <span className="rounded-full bg-emerald-500 px-2 py-px text-[9px] font-bold tracking-wide text-white">
+            ON
+          </span>
+        ) : (
+          <span className="h-3.5 w-6 rounded-full bg-zinc-700 p-0.5">
+            <span className="block h-2.5 w-2.5 rounded-full bg-zinc-500" />
+          </span>
+        )}
+      </button>
+      {routeVisible && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2.5"
+        >
+          <div className="text-[11px] text-zinc-400">
+            {plan.n_stops} stops · {plan.total_km.toFixed(1)} km
+          </div>
+          <div className="mt-0.5 text-sm font-bold text-white">
+            ~{formatMinutes(plan.est_minutes)} {plan.mode}
+          </div>
+          <a
+            href={routePlanGpxUrl(plan.region, plan.mode)}
+            className="mt-2 block rounded-md bg-emerald-600 px-2 py-1.5 text-center text-[11px] font-semibold text-white transition-colors hover:bg-emerald-500"
+            download
+          >
+            Download GPX
+          </a>
+        </motion.div>
+      )}
+    </div>
+  )
+}
+
+export function Sidebar({
+  stats,
+  routePlan,
+}: {
+  stats: RegionStats | null
+  routePlan: RoutePlan | null
+}) {
   const { sidebarOpen, setSidebarOpen } = useAppState()
 
   return (
@@ -122,6 +184,8 @@ export function Sidebar({ stats }: { stats: RegionStats | null }) {
               </button>
 
               <LayerRows />
+
+              {routePlan && <RoutePanel plan={routePlan} />}
 
               <div className="mt-5 px-1.5 pb-1.5 text-xs font-semibold text-zinc-300">KPI</div>
               {stats && (

@@ -8,11 +8,17 @@ import type {
   PointCollection,
   Region,
   RegionStats,
+  RouteMode,
+  RoutePlan,
 } from './types'
 
 export const USE_MOCKS = false
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+
+// Gap route planner ships dark (docs/ROUTE_PLANNER.md): local-only until the
+// production DB has plans and this flag is set in the Vercel build.
+export const FEATURE_ROUTE_PLANNER = import.meta.env.VITE_FEATURE_ROUTE_PLANNER === 'true'
 
 async function getJson<T>(path: string, retries = 0): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -71,4 +77,19 @@ export async function fetchGaps(region: string): Promise<GapCollection> {
 export async function fetchStats(region: string): Promise<RegionStats> {
   if (USE_MOCKS) return getMock(`stats.${region}`)
   return getJson(`/api/stats?region=${region}`)
+}
+
+/** null = no plan for this region/mode (contract: 404 means "not planned"). */
+export async function fetchRoutePlan(
+  region: string,
+  mode: RouteMode = 'drive',
+): Promise<RoutePlan | null> {
+  const res = await fetch(`${API_BASE}/api/route-plan?region=${region}&mode=${mode}`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`API route-plan failed: ${res.status}`)
+  return (await res.json()) as RoutePlan
+}
+
+export function routePlanGpxUrl(region: string, mode: RouteMode = 'drive'): string {
+  return `${API_BASE}/api/route-plan/gpx?region=${region}&mode=${mode}`
 }

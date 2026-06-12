@@ -78,6 +78,32 @@ export interface GapProperties {
 
 export type GapCollection = FeatureCollection<PointGeometry | LineStringGeometry, GapProperties>
 
+// --- GET /api/route-plan ---------------------------------------------------------
+
+export type RouteMode = 'drive' | 'bike'
+
+export interface RouteFeatureProperties {
+  kind: 'stop' | 'leg'
+  order: number // 1-based; leg n connects stop n to stop n+1
+  road?: string // stops only
+  gap_count?: number // stops only
+  length_km?: number // legs only
+}
+
+export type RouteCollection = FeatureCollection<
+  PointGeometry | LineStringGeometry,
+  RouteFeatureProperties
+>
+
+export interface RoutePlan {
+  region: string
+  mode: RouteMode
+  n_stops: number
+  total_km: number
+  est_minutes: number
+  route: RouteCollection
+}
+
 // --- GET /api/stats --------------------------------------------------------------
 
 export interface AgeHistogramBin {

@@ -19,6 +19,9 @@ export interface AppState {
   setActiveLayer: (layer: LayerId) => void
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
+  // Gap route overlay (feature-flagged); composes with the active layer.
+  routeVisible: boolean
+  setRouteVisible: (visible: boolean) => void
 }
 
 export const AppStateContext = createContext<AppState | null>(null)
