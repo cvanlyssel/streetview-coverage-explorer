@@ -12,6 +12,7 @@ import os
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from .db import get_conn
 from .models import (
@@ -50,6 +51,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# The points endpoint is ~11 MB raw for a whole region; gzip gets it to a
+# size the free-tier instance can push reliably.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Age of a 'YYYY-MM' pano date in years, relative to today (floored at 0).
 AGE_YEARS_SQL = """

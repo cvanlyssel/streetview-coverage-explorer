@@ -14,12 +14,22 @@ export const USE_MOCKS = false
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`)
-  if (!res.ok) {
-    throw new Error(`API ${path} failed: ${res.status} ${res.statusText}`)
+async function getJson<T>(path: string, retries = 0): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`)
+      if (!res.ok) {
+        throw new Error(`API ${path} failed: ${res.status} ${res.statusText}`)
+      }
+      return (await res.json()) as T
+    } catch (err) {
+      // Free-tier hosting can drop the first heavy response (cold start,
+      // memory pressure); one spaced retry covers that without masking
+      // real outages.
+      if (attempt >= retries) throw err
+      await new Promise((r) => setTimeout(r, 2500))
+    }
   }
-  return res.json() as Promise<T>
 }
 
 // Mocks only exist for the regions in src/mock/ (currently just "madison");
@@ -50,7 +60,7 @@ export async function fetchPoints(
     return { type: 'FeatureCollection', features: [] }
   }
   const bboxParam = bbox ? `&bbox=${bbox.join(',')}` : ''
-  return getJson(`/api/coverage/points?region=${region}${bboxParam}`)
+  return getJson(`/api/coverage/points?region=${region}${bboxParam}`, 2)
 }
 
 export async function fetchGaps(region: string): Promise<GapCollection> {
