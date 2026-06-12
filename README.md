@@ -9,7 +9,9 @@ Not the imagery — the *metadata*. Where Street View exists, how stale it is, w
 from a Google car or someone's photosphere, and which roads have no coverage at all: the
 questions GeoGuessr map-makers and geodata nerds actually ask.
 
-> Live demo: *deployment in progress — see [docs/DEPLOYMENT_PLAN.md](docs/DEPLOYMENT_PLAN.md)*
+> **Live demo: [streetview-coverage-explorer.vercel.app](https://streetview-coverage-explorer.vercel.app)**
+> The API runs on a free tier that sleeps when idle — the first load may take
+> ~30–60 s to wake it. Architecture in [docs/DEPLOYMENT_PLAN.md](docs/DEPLOYMENT_PLAN.md).
 
 ## The real numbers (Madison, WI)
 
