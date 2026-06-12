@@ -91,6 +91,34 @@ Summary numbers for the dashboard/header.
 }
 ```
 
+### `GET /api/route-plan?region=madison&mode=drive`
+Precomputed gap-filling route (see `ROUTE_PLANNER.md`). `mode` is `"drive" | "bike"`.
+**404** when no plan exists for the (region, mode) pair — clients treat that as
+"not planned", not an error. Feature-flagged in the UI; local-only for now.
+```json
+{
+  "region": "madison",
+  "mode": "drive",
+  "n_stops": 18,
+  "total_km": 42.3,
+  "est_minutes": 101,
+  "route": {
+    "type": "FeatureCollection",
+    "features": [
+      { "type": "Feature", "geometry": { "type": "Point", "coordinates": [-89.41, 43.06] },
+        "properties": { "kind": "stop", "order": 1, "road": "Eastpark Blvd", "gap_count": 14 } },
+      { "type": "Feature", "geometry": { "type": "LineString", "coordinates": [[-89.41,43.06], [-89.40,43.07]] },
+        "properties": { "kind": "leg", "order": 1, "length_km": 2.1 } }
+    ]
+  }
+}
+```
+- Stop `order` is 1-based visit order; leg `order` n connects stop n to stop n+1.
+
+### `GET /api/route-plan/gpx?region=madison&mode=drive`
+The same plan as `application/gpx+xml` (attachment): stops as `<wpt>`, the
+full route as one `<trk>`. Same 404 semantics.
+
 ---
 
 ## Mock data
