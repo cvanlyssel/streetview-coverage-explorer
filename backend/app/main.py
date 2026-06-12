@@ -13,6 +13,7 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import Response
 
 from .db import get_conn
 from .models import (
@@ -30,6 +31,8 @@ from .models import (
     PolygonGeometry,
     Region,
     RegionStats,
+    RouteMode,
+    RoutePlan,
 )
 
 app = FastAPI(title="Street View Coverage Explorer API")
@@ -191,6 +194,53 @@ def gaps(region: str, conn=Depends(get_conn)) -> GapCollection:
             for r in cur.fetchall()
         ]
     return GapCollection(features=features)
+
+
+def _route_plan_row(cur, region: str, mode: str, columns: str):
+    """Shared lookup with the contract's 404-means-not-planned semantics."""
+    require_region(cur, region)
+    cur.execute(
+        f"SELECT {columns} FROM route_plans WHERE region = %s AND mode = %s",
+        (region, mode),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No {mode} route plan for {region}")
+    return row
+
+
+@app.get("/api/route-plan", response_model=RoutePlan)
+def route_plan(region: str, mode: RouteMode = "drive", conn=Depends(get_conn)) -> RoutePlan:
+    with conn.cursor() as cur:
+        try:
+            row = _route_plan_row(cur, region, mode, "n_stops, total_km, est_minutes, route")
+        except Exception as exc:
+            # route_plans may not exist on a DB that never ran plan_route.py
+            if "route_plans" in str(exc) and "does not exist" in str(exc):
+                raise HTTPException(status_code=404, detail="No route plans") from None
+            raise
+    return RoutePlan(
+        region=region, mode=mode, n_stops=row[0], total_km=row[1],
+        est_minutes=row[2], route=row[3],
+    )
+
+
+@app.get("/api/route-plan/gpx")
+def route_plan_gpx(region: str, mode: RouteMode = "drive", conn=Depends(get_conn)) -> Response:
+    with conn.cursor() as cur:
+        try:
+            (gpx,) = _route_plan_row(cur, region, mode, "gpx")
+        except Exception as exc:
+            if "route_plans" in str(exc) and "does not exist" in str(exc):
+                raise HTTPException(status_code=404, detail="No route plans") from None
+            raise
+    return Response(
+        content=gpx,
+        media_type="application/gpx+xml",
+        headers={
+            "Content-Disposition": f'attachment; filename="{region}-gap-route-{mode}.gpx"'
+        },
+    )
 
 
 @app.get("/api/stats", response_model=RegionStats)

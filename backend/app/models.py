@@ -23,6 +23,11 @@ class PolygonGeometry(BaseModel):
     coordinates: list[list[list[float]]]
 
 
+class LineStringGeometry(BaseModel):
+    type: Literal["LineString"] = "LineString"
+    coordinates: list[list[float]]
+
+
 # --- GET /api/regions ---------------------------------------------------------
 
 
@@ -117,3 +122,36 @@ class RegionStats(BaseModel):
     oldest_date: str  # "YYYY-MM"
     newest_date: str  # "YYYY-MM"
     age_histogram: list[AgeHistogramBin]
+
+
+# --- GET /api/route-plan -----------------------------------------------------------
+
+RouteMode = Literal["drive", "bike"]
+
+
+class RouteFeatureProperties(BaseModel):
+    kind: Literal["stop", "leg"]
+    order: int  # 1-based; leg n connects stop n to stop n+1
+    road: str | None = None  # stops only
+    gap_count: int | None = None  # stops only
+    length_km: float | None = None  # legs only
+
+
+class RouteFeature(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    geometry: PointGeometry | LineStringGeometry
+    properties: RouteFeatureProperties
+
+
+class RouteCollection(BaseModel):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[RouteFeature]
+
+
+class RoutePlan(BaseModel):
+    region: str
+    mode: RouteMode
+    n_stops: int
+    total_km: float
+    est_minutes: int
+    route: RouteCollection

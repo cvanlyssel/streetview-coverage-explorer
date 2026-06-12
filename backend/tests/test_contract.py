@@ -159,3 +159,44 @@ def test_unknown_region_404() -> None:
         "/api/stats?region=nowhere",
     ):
         assert client.get(path).status_code == 404
+
+
+# --- /api/route-plan (feature-flagged UI; 404 = not planned, per contract) -------
+
+
+def test_route_plan_shape(region_id: str) -> None:
+    res = client.get(f"/api/route-plan?region={region_id}&mode=drive")
+    if res.status_code == 404:
+        pytest.skip("no route plan for this region — run data/plan_route.py")
+    assert res.status_code == 200
+    plan = res.json()
+    assert plan["region"] == region_id
+    assert plan["mode"] == "drive"
+    assert plan["n_stops"] >= 1
+    assert plan["total_km"] > 0
+    assert plan["est_minutes"] > 0
+    features = plan["route"]["features"]
+    stops = [f for f in features if f["properties"]["kind"] == "stop"]
+    legs = [f for f in features if f["properties"]["kind"] == "leg"]
+    assert len(stops) == plan["n_stops"]
+    assert len(legs) == plan["n_stops"] - 1
+    assert [s["properties"]["order"] for s in stops] == list(range(1, len(stops) + 1))
+    assert all(s["geometry"]["type"] == "Point" for s in stops)
+    assert all(leg["geometry"]["type"] == "LineString" for leg in legs)
+    assert all(s["properties"]["road"] for s in stops)
+    assert all(s["properties"]["gap_count"] >= 1 for s in stops)
+
+
+def test_route_plan_gpx(region_id: str) -> None:
+    res = client.get(f"/api/route-plan/gpx?region={region_id}&mode=drive")
+    if res.status_code == 404:
+        pytest.skip("no route plan for this region — run data/plan_route.py")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/gpx+xml")
+    assert "attachment" in res.headers["content-disposition"]
+    assert res.text.startswith("<?xml")
+    assert "<trkpt" in res.text and "<wpt" in res.text
+
+
+def test_route_plan_unknown_region_404() -> None:
+    assert client.get("/api/route-plan?region=nowhere").status_code == 404
